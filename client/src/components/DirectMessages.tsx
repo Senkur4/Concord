@@ -6,7 +6,7 @@ import type { DirectChannel, GameData, Message, StickerMessageData } from '../li
 import { useApp } from '../store/app';
 import { profileTriggers } from '../store/popover';
 import { toast } from '../store/toast';
-import { AttachButton, MessageAttachments, PendingAttachments, useAttachmentDraft } from './Attachments';
+import { AttachButton, ExpiryBadge, MessageAttachments, PendingAttachments, useAttachmentDraft } from './Attachments';
 import { RichText } from './ChatView';
 import { GameCard, GameMenuButton } from './Games';
 import { StickerButton, StickerMessage } from './StickerPicker';
@@ -337,6 +337,7 @@ function DmBubble({ message, grouped }: { message: Message; grouped: boolean }) 
           )
         )}
         {!editing && <MessageAttachments items={message.attachments} />}
+        <ExpiryBadge expiresAt={message.expiresAt} />
       </div>
     </div>
   );
@@ -360,7 +361,12 @@ function DmComposer({ dm }: { dm: DirectChannel }) {
     if (!content && !attachments.length) return;
     setText('');
     try {
-      await api.post(`/dms/${dm.id}/messages`, { content, replyTo: replying?.id, ...(attachments.length ? { attachments } : {}) });
+      await api.post(`/dms/${dm.id}/messages`, {
+        content,
+        replyTo: replying?.id,
+        ...(attachments.length ? { attachments } : {}),
+        ...(attachments.length && files.expiresIn ? { expiresIn: files.expiresIn } : {}),
+      });
       files.clear();
       useApp.getState().setReplying(dm.id, null);
     } catch (err) {
@@ -379,7 +385,7 @@ function DmComposer({ dm }: { dm: DirectChannel }) {
   return (
     <div className="relative shrink-0 px-4 pb-3 md:px-6 md:pb-5">
       <ReplyBar conversationId={dm.id} name={(m) => (m.author.id === dm.user.id ? m.author.displayName : 'você mesmo')} />
-      <PendingAttachments items={files.items} onRemove={files.remove} />
+      <PendingAttachments items={files.items} onRemove={files.remove} expiresIn={files.expiresIn} onExpiresIn={files.setExpiresIn} />
       <div className="flex items-end gap-2" onDragOver={(e) => e.preventDefault()} onDrop={files.onDrop}>
         <GameMenuButton target={{ kind: 'dm', id: dm.id }} />
         <StickerButton target={{ kind: 'dm', id: dm.id }} />

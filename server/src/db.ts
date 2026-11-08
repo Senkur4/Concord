@@ -138,7 +138,21 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+  -- envios grandes em andamento (em pedaços, direto para o disco; ver bigupload.ts)
+  CREATE TABLE IF NOT EXISTS upload_sessions (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    ext TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    touched_at INTEGER NOT NULL
+  );
 `);
+// validade: a mensagem (e os anexos) somem sozinhos nessa hora
+addColumn('messages', 'expires_at', 'INTEGER');
+db.exec('CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at) WHERE expires_at IS NOT NULL');
+
 // e-mail de recuperação (opcional): só entra aqui depois de confirmado pelo link
 addColumn('users', 'email', 'TEXT');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL');
@@ -262,6 +276,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_server_patches ON server_patches(server_id, created_at);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_bot_token ON users(bot_token_hash) WHERE bot_token_hash IS NOT NULL;
 `);
+addColumn('dm_messages', 'expires_at', 'INTEGER');
+db.exec('CREATE INDEX IF NOT EXISTS idx_dm_messages_expires ON dm_messages(expires_at) WHERE expires_at IS NOT NULL');
 
 // Canais de fórum: bancos antigos têm o CHECK de channels.type só com 'text' e 'voice'. O SQLite não altera
 // um CHECK, então a tabela é recriada com as mesmas colunas (as chaves estrangeiras apontam pelo nome).
@@ -815,6 +831,8 @@ export interface MessageRow {
   reply_to?: string | null;
   created_at: number;
   edited_at: number | null;
+  /** validade: some sozinha nessa hora */
+  expires_at?: number | null;
 }
 
 export interface DmChannelRow {

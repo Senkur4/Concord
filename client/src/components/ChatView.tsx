@@ -1,7 +1,7 @@
 import { ClipCard } from './Clip';
 import { Hash, Pencil, Reply, Trash2, Users } from 'lucide-react';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { AttachButton, MessageAttachments, PendingAttachments, pickAttachments, useAttachmentDraft } from './Attachments';
+import { AttachButton, ExpiryBadge, MessageAttachments, PendingAttachments, pickAttachments, useAttachmentDraft } from './Attachments';
 import { P, has } from '../../../shared/permissions.ts';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
@@ -302,6 +302,7 @@ function Bubble({
         )}
         {!editing && jamLink && !onlyJamLink && <JamCard url={jamLink.url} jam={jamLink.jam} authorName={name} mine={mine} />}
         {!editing && <MessageAttachments items={message.attachments} />}
+        <ExpiryBadge expiresAt={message.expiresAt} />
       </div>
     </div>
   );
@@ -450,7 +451,7 @@ export function Composer({ channel, compact = false }: { channel: Channel; compa
     try {
       if (attachments.length) {
         // se falhar, o texto volta (catch abaixo) e os arquivos continuam na fila
-        await api.post(`/channels/${channel.id}/messages`, { content, attachments, replyTo });
+        await api.post(`/channels/${channel.id}/messages`, { content, attachments, replyTo, ...(files.expiresIn ? { expiresIn: files.expiresIn } : {}) });
         files.clear();
         useApp.getState().setReplying(channel.id, null);
         return;
@@ -546,7 +547,7 @@ export function Composer({ channel, compact = false }: { channel: Channel; compa
         </div>
       )}
       <ReplyBar conversationId={channel.id} name={replyName} />
-      <PendingAttachments items={files.items} onRemove={files.remove} />
+      <PendingAttachments items={files.items} onRemove={files.remove} expiresIn={files.expiresIn} onExpiresIn={files.setExpiresIn} />
       <div className="flex items-end gap-2" onDragOver={(e) => canSend && e.preventDefault()} onDrop={(e) => canSend && files.onDrop(e)}>
         {canSend && <GameMenuButton target={{ kind: 'channel', id: channel.id }} compact={compact} onAttach={compact ? () => void pickAttachments().then((f) => f && files.add(f)) : undefined} />}
         {canSend && <StickerButton target={{ kind: 'channel', id: channel.id }} compact={compact} />}

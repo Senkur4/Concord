@@ -420,6 +420,8 @@ export interface Message {
   author: User;
   /** mensagem que esta responde (prévia), ou null */
   replyTo?: ReplyPreview | null;
+  /** validade: a mensagem some sozinha nessa hora */
+  expiresAt?: number | null;
 }
 
 /** Prévia da mensagem respondida. `deleted`: a original foi apagada. */

@@ -55,6 +55,7 @@ import { isAdmin, registerAdminRoutes } from './admin.ts';
 import { integrationsStatus, registerIntegrationRoutes, registerPublicIntegrationRoutes } from './integrations.ts';
 import { registerPresenceRoutes, registerPublicPresenceRoutes } from './presence.ts';
 import { registerPinterestRoutes } from './pinterest.ts';
+import { registerBigUploadRoutes, sweepUploads } from './bigupload.ts';
 import {
   avatarLocked,
   mecenasBadge,
@@ -328,6 +329,7 @@ const messageJson = (m: MessageWithAuthor) => ({
   editedAt: m.edited_at,
   author: authorJson({ ...m, id: m.author_id }),
   replyTo: replyJson(m),
+  expiresAt: m.expires_at ?? null,
 });
 
 /** Prévia da mensagem respondida (só o começo do texto). */
@@ -2234,6 +2236,20 @@ api.post('/attachments', humansOnly, attachmentBody, (req, res) => {
   res.json(attachmentJson(row));
 });
 
+// anexos grandes: em pedaços, direto para o disco (ver bigupload.ts)
+registerBigUploadRoutes(api, { attachmentJson, allowUpload: uploadsPerUser, humansOnly });
+
+/**
+ * Validade da mensagem: de 1 a 24 horas ou de 1 a 30 dias (em segundos, como o app manda). Sem validade: null.
+ * Quando acaba, a mensagem e os anexos são apagados (ver a faxina abaixo).
+ */
+const EXPIRY_CHOICES = new Set([...Array.from({ length: 24 }, (_, i) => (i + 1) * 3600), ...Array.from({ length: 30 }, (_, i) => (i + 1) * 86400)]);
+function expiryFrom(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'number' || !EXPIRY_CHOICES.has(raw)) fail(400, 'Validade inválida (de 1 a 24 horas ou de 1 a 30 dias)');
+  return now() + (raw as number) * 1000;
+}
+
 /** Confere os anexos de uma mensagem nova: enviados por quem manda e ainda sem mensagem. */
 function pendingAttachments(raw: unknown, me: string): AttachmentRow[] {
   if (raw === undefined || raw === null) return [];
@@ -2273,7 +2289,26 @@ setInterval(() => {
     removeUpload(a.url);
     run('DELETE FROM attachments WHERE id = ?', a.id);
   }
+  sweepUploads();
 }, 60 * 60_000).unref();
+
+// validade: a cada 30 s apaga as mensagens vencidas (e os anexos delas), avisando quem está com a conversa aberta
+async function sweepExpired() {
+  const t = now();
+  for (const m of all<{ id: string; channel_id: string }>('SELECT id, channel_id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ? LIMIT 200', t)) {
+    run('DELETE FROM messages WHERE id = ?', m.id);
+    deleteAttachments(m.id);
+    const channel = get<ChannelRow>('SELECT * FROM channels WHERE id = ?', m.channel_id);
+    if (channel) await emitToChannel(channel, 'message:delete', { id: m.id, channelId: channel.id });
+  }
+  for (const m of all<{ id: string; dm_id: string }>('SELECT id, dm_id FROM dm_messages WHERE expires_at IS NOT NULL AND expires_at <= ? LIMIT 200', t)) {
+    run('DELETE FROM dm_messages WHERE id = ?', m.id);
+    deleteAttachments(m.id);
+    const dm = get<DmChannelRow>('SELECT * FROM dm_channels WHERE id = ?', m.dm_id);
+    if (dm) deliverDm(dm, 'dm:delete', { id: m.id, channelId: dm.id });
+  }
+}
+setInterval(() => void sweepExpired().catch((err) => console.error('[validade]', err)), Number(process.env.EXPIRY_SWEEP_MS) || 30_000).unref();
 
 // anti-flood: por pessoa (ou bot), somando canais e conversas privadas. Uma conversa animada não chega perto disso.
 const messagesBurst = limiter(10, 10_000);
@@ -2290,9 +2325,10 @@ api.post('/channels/:id/messages', async (req, res) => {
   const files = pendingAttachments(req.body?.attachments, me);
   const content = messageContent(req.body?.content, files.length > 0);
   const replyTo = replyTarget(req.body?.replyTo, 'messages', 'channel_id', channel.id);
+  const expiresAt = expiryFrom(req.body?.expiresIn);
   const id = randomUUID();
   run(
-    'INSERT INTO messages (id, channel_id, author_id, content, attachments, reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (id, channel_id, author_id, content, attachments, reply_to, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     id,
     channel.id,
     me,
@@ -2300,6 +2336,7 @@ api.post('/channels/:id/messages', async (req, res) => {
     attachmentsField(files),
     replyTo,
     now(),
+    expiresAt,
   );
   claimAttachments(files, id);
   const msg = messageJson(get<MessageWithAuthor>(`${MESSAGE_SELECT} WHERE m.id = ?`, id)!);
@@ -2918,7 +2955,7 @@ api.post('/voice/clip', humansOnly, async (req, res) => {
 
 // ============================================================ Conversas privadas (DMs)
 
-const DM_SELECT = `SELECT m.id, m.dm_id AS channel_id, m.author_id, m.content, m.kind, m.data, m.attachments, m.reply_to, m.created_at, m.edited_at,
+const DM_SELECT = `SELECT m.id, m.dm_id AS channel_id, m.author_id, m.content, m.kind, m.data, m.attachments, m.reply_to, m.created_at, m.edited_at, m.expires_at,
   u.username, u.display_name, u.avatar_color, u.avatar_url, u.banner_color, u.bio, u.banner_url, u.is_bot, u.profile_style,
   ${REPLY_COLUMNS}
   FROM dm_messages m JOIN users u ON u.id = m.author_id
@@ -2991,11 +3028,12 @@ function insertDmMessage(
   data: unknown = null,
   files: AttachmentRow[] = [],
   replyTo: string | null = null,
+  expiresAt: number | null = null,
 ) {
   const id = randomUUID();
   const at = now();
   run(
-    'INSERT INTO dm_messages (id, dm_id, author_id, content, kind, data, attachments, reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO dm_messages (id, dm_id, author_id, content, kind, data, attachments, reply_to, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     id,
     dm.id,
     me,
@@ -3005,6 +3043,7 @@ function insertDmMessage(
     attachmentsField(files),
     replyTo,
     at,
+    expiresAt,
   );
   claimAttachments(files, id);
   run('UPDATE dm_channels SET last_message_at = ? WHERE id = ?', at, dm.id);
@@ -3027,7 +3066,8 @@ api.post('/dms/:id/messages', (req, res) => {
   requireMessageQuota(me);
   const files = pendingAttachments(req.body?.attachments, me);
   const replyTo = replyTarget(req.body?.replyTo, 'dm_messages', 'dm_id', dm.id);
-  res.json(insertDmMessage(dm, me, messageContent(req.body?.content, files.length > 0), 'text', null, files, replyTo));
+  const expiresAt = expiryFrom(req.body?.expiresIn);
+  res.json(insertDmMessage(dm, me, messageContent(req.body?.content, files.length > 0), 'text', null, files, replyTo, expiresAt));
 });
 
 api.post('/dms/:id/games', (req, res) => {
@@ -3159,11 +3199,11 @@ api.post('/forward', (req, res) => {
     const rows = copyFiles();
     if (!original.content && !rows.length && kind === 'text') continue; // só tinha anexos e eles sumiram
     if (t.type === 'dm') {
-      insertDmMessage(t.dm, me, original.content, kind, data, rows);
+      insertDmMessage(t.dm, me, original.content, kind, data, rows, null, original.expires_at ?? null);
     } else {
       const id = randomUUID();
       run(
-        'INSERT INTO messages (id, channel_id, author_id, content, kind, data, attachments, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO messages (id, channel_id, author_id, content, kind, data, attachments, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         id,
         t.channel.id,
         me,
@@ -3172,6 +3212,7 @@ api.post('/forward', (req, res) => {
         JSON.stringify(data),
         attachmentsField(rows),
         now(),
+        original.expires_at ?? null, // a cópia some junto com a original
       );
       claimAttachments(rows, id);
       void emitToChannel(t.channel, 'message:new', messageJson(get<MessageWithAuthor>(`${MESSAGE_SELECT} WHERE m.id = ?`, id)!));

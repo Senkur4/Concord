@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, linkSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { PACK_STICKER_MAX_BYTES } from '../../shared/cosmetics.ts';
 import { config } from './config.ts';
@@ -72,7 +72,7 @@ export function saveSound(owner: string, body: unknown): string {
 
 // Anexos: só tipos comuns de documento, mídia e compactado. Nada que o navegador execute (html, svg, js)
 // nem executáveis. O que não é imagem é baixado (Content-Disposition: attachment, ver index.ts).
-const FILE_EXTS = new Set([
+export const FILE_EXTS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp',
   'pdf', 'txt', 'md', 'csv', 'json', 'log',
   'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf',
@@ -117,10 +117,17 @@ export function copyAttachmentFile(url: string, owner: string): string | null {
   if (!m) return null;
   const dir = join(config.uploadsDir, 'files');
   const name = `${owner}-${randomBytes(16).toString('hex')}.${m[2].toLowerCase()}`;
+  const from = join(dir, basename(`${m[1]}.${m[2]}`));
   try {
-    copyFileSync(join(dir, basename(`${m[1]}.${m[2]}`)), join(dir, name));
+    // "link" do mesmo arquivo: não ocupa espaço de novo (um jogo de 10 GB encaminhado continua ocupando 10 GB),
+    // e apagar um não apaga o outro. Onde o disco não aceita, copia.
+    linkSync(from, join(dir, name));
   } catch {
-    return null; // o arquivo original já não existe
+    try {
+      copyFileSync(from, join(dir, name));
+    } catch {
+      return null; // o arquivo original já não existe
+    }
   }
   return `/uploads/files/${name}`;
 }

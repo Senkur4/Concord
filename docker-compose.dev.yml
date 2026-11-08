@@ -29,6 +29,9 @@
          STEAM_API_KEY: ${STEAM_API_KEY:-}
          # endereço do Concord para quem está no Radmin: a Steam devolve o login para cá
          PUBLIC_URL: http://${HOST_IP}:3000
+         # anexos: tamanho máximo em GB (vazio = sem limite) e quanto do disco sempre fica livre (padrão 5 GB)
+         ATTACH_MAX_GB: ${ATTACH_MAX_GB:-}
+         ATTACH_DISK_RESERVE_GB: ${ATTACH_DISK_RESERVE_GB:-5}
        volumes:
          - ./data-dev:/data
        depends_on:
