@@ -222,6 +222,13 @@ export function MemberPopover() {
               <p className="mt-1 text-sm break-words whitespace-pre-wrap">{member.bio}</p>
             </>
           )}
+          <GameCollection
+            userId={member.id}
+            onOpen={() => {
+              close();
+              useApp.getState().openProfile(member.id, detail.server.id);
+            }}
+          />
           <div className="my-3 h-px bg-line" />
           <div className="text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Membro desde</div>
           <div className="mb-3 text-sm">{new Date(member.joinedAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
@@ -476,6 +483,87 @@ function ModButton({ icon, label, onClick, danger }: { icon: React.ReactNode; la
       {icon}
       {label}
     </button>
+  );
+}
+
+// ------------------------------------------------------------------ coleção de jogos (Steam)
+
+interface SteamSummary {
+  linked: boolean;
+  private?: boolean;
+  total?: number;
+  featured?: boolean;
+  games?: { appid: number; name: string; icon: string | null; playtimeMin: number }[];
+}
+
+// o cartão abre toda hora (passar o mouse): guarda o resumo de cada pessoa por alguns minutos
+const summaries = new Map<string, { at: number; data: SteamSummary }>();
+const SUMMARY_TTL = 5 * 60_000;
+
+function useSteamSummary(userId: string) {
+  const cachedNow = summaries.get(userId);
+  const [data, setData] = useState<SteamSummary | null>(cachedNow && Date.now() - cachedNow.at < SUMMARY_TTL ? cachedNow.data : null);
+  useEffect(() => {
+    const hit = summaries.get(userId);
+    if (hit && Date.now() - hit.at < SUMMARY_TTL) {
+      setData(hit.data);
+      return;
+    }
+    setData(null);
+    let alive = true;
+    api
+      .get<SteamSummary>(`/users/${userId}/steam/summary`)
+      .then((d) => {
+        summaries.set(userId, { at: Date.now(), data: d });
+        if (alive) setData(d);
+      })
+      .catch(() => alive && setData({ linked: false }));
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+  return data;
+}
+
+const steamCapsule = (appid: number) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/capsule_sm_120.jpg`;
+
+/** "Coleção de jogos": alguns jogos da Steam da pessoa e quantos tem ao todo; clicar abre o perfil. */
+function GameCollection({ userId, onOpen }: { userId: string; onOpen: () => void }) {
+  const data = useSteamSummary(userId);
+  const games = data?.games ?? [];
+  if (!data?.linked || data.private || !games.length) return null;
+  const shown = games.slice(0, 3);
+  const rest = Math.max(0, (data.total ?? games.length) - shown.length);
+  return (
+    <>
+      <div className="my-3 h-px bg-line" />
+      <button
+        onClick={onOpen}
+        title="Ver os jogos no perfil"
+        className="flex w-full items-center gap-2 rounded-xl bg-surface-2 p-2.5 text-left transition-colors hover:bg-surface-3"
+      >
+        <Gamepad2 size={16} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{data.featured ? 'Favoritos' : 'Jogos'}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {shown.map((g) => (
+            <img
+              key={g.appid}
+              src={g.icon ?? steamCapsule(g.appid)}
+              alt={g.name}
+              title={g.name}
+              loading="lazy"
+              className="h-7 w-7 rounded-md bg-surface-4 object-cover ring-1 ring-line"
+              onError={(e) => {
+                // ícone pequeno indisponível: tenta a capa do jogo
+                const img = e.currentTarget;
+                if (img.src !== steamCapsule(g.appid)) img.src = steamCapsule(g.appid);
+              }}
+            />
+          ))}
+          {rest > 0 && <span className="flex h-7 min-w-7 items-center justify-center rounded-md bg-surface-4 px-1 text-[11px] font-bold text-fg-muted">+{rest}</span>}
+        </span>
+      </button>
+    </>
   );
 }
 

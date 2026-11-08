@@ -60,6 +60,8 @@ export interface SteamGame {
   name: string;
   playtimeMin: number;
   playtime2wMin: number;
+  /** ícone quadrado pequeno do jogo (32x32), quando a Steam informa */
+  icon: string | null;
 }
 
 /** Biblioteca de uma conta da Steam (null = perfil com detalhes de jogos privados). */
@@ -71,12 +73,20 @@ async function steamLibrary(steamId: string) {
       getJson(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${key}&steamids=${steamId}`),
     ]);
     const player = (summary as { response?: { players?: { personaname?: string; avatarfull?: string; profileurl?: string }[] } }).response?.players?.[0];
-    const games = (owned as { response?: { games?: { appid: number; name?: string; playtime_forever?: number; playtime_2weeks?: number }[] } }).response?.games;
+    const games = (owned as { response?: { games?: { appid: number; name?: string; playtime_forever?: number; playtime_2weeks?: number; img_icon_url?: string }[] } }).response?.games;
     return {
       profile: player ? { name: player.personaname ?? '', avatar: player.avatarfull ?? null, url: player.profileurl ?? `https://steamcommunity.com/profiles/${steamId}` } : null,
       games: games
         ? games
-            .map((g): SteamGame => ({ appid: g.appid, name: g.name ?? `App ${g.appid}`, playtimeMin: g.playtime_forever ?? 0, playtime2wMin: g.playtime_2weeks ?? 0 }))
+            .map(
+              (g): SteamGame => ({
+                appid: g.appid,
+                name: g.name ?? `App ${g.appid}`,
+                playtimeMin: g.playtime_forever ?? 0,
+                playtime2wMin: g.playtime_2weeks ?? 0,
+                icon: g.img_icon_url ? `https://media.steampowered.com/steamcommunity/public/images/apps/${g.appid}/${g.img_icon_url}.jpg` : null,
+              }),
+            )
             .sort((a, b) => b.playtimeMin - a.playtimeMin)
         : null,
     };
@@ -142,7 +152,15 @@ export function registerPublicIntegrationRoutes(api: Router, hooks: { meUpdated:
   });
 }
 
-export function registerIntegrationRoutes(api: Router, hooks: { meUpdated: (userId: string) => void; canSee: (me: string, userId: string) => boolean }) {
+export function registerIntegrationRoutes(
+  api: Router,
+  hooks: {
+    meUpdated: (userId: string) => void;
+    canSee: (me: string, userId: string) => boolean;
+    /** jogos em destaque da página do perfil e se a vitrine da Steam está ligada */
+    steamShowcase: (userId: string) => { featured: number[]; visible: boolean };
+  },
+) {
   /** Começa a conexão com a Steam: devolve o endereço do login da Steam (aberto no navegador). */
   api.post('/me/steam/link', (_req, res) => {
     if (!integrationsStatus().steam) fail(503, 'A integração com a Steam não está configurada neste servidor.');
@@ -165,6 +183,31 @@ export function registerIntegrationRoutes(api: Router, hooks: { meUpdated: (user
     run('UPDATE users SET steam_id = NULL WHERE id = ?', uid(res));
     hooks.meUpdated(uid(res));
     res.json({ ok: true });
+  });
+
+  // resumo para o mini-perfil: poucos jogos (os em destaque, ou os mais jogados) e o total da biblioteca
+  api.get('/users/:id/steam/summary', async (req, res) => {
+    if (!hooks.canSee(uid(res), req.params.id)) fail(404, 'Perfil não encontrado');
+    const u = get<UserRow>('SELECT steam_id FROM users WHERE id = ?', req.params.id);
+    const showcase = hooks.steamShowcase(req.params.id);
+    if (!u?.steam_id || !integrationsStatus().steam || !showcase.visible) return res.json({ linked: false });
+    let library: Awaited<ReturnType<typeof steamLibrary>>;
+    try {
+      library = await steamLibrary(u.steam_id);
+    } catch {
+      return res.json({ linked: true, private: false, total: 0, games: [] }); // a Steam não respondeu: o cartão só não mostra os jogos
+    }
+    if (!library.games) return res.json({ linked: true, private: true, total: 0, games: [] });
+    const byId = new Map(library.games.map((g) => [g.appid, g]));
+    const featured = showcase.featured.map((id) => byId.get(id)).filter((g): g is SteamGame => !!g);
+    const pick = (featured.length ? featured : library.games).slice(0, 5);
+    res.json({
+      linked: true,
+      private: false,
+      total: library.games.length,
+      featured: featured.length > 0,
+      games: pick.map((g) => ({ appid: g.appid, name: g.name, icon: g.icon, playtimeMin: g.playtimeMin })),
+    });
   });
 
   api.get('/users/:id/steam', async (req, res) => {

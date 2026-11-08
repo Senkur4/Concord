@@ -45,6 +45,7 @@ export default {
     'Nomes de canais de texto agora aceitam emoji, e os campos de nome ganharam um botão para escolher um.',
     'Os grupos Salas, Fóruns e Conversas podem ganhar outro nome e mudar de lugar no meio das categorias: arraste o título, ou use a engrenagem.',
     'A conexão com a Steam também fica em Configurações → Conta e segurança, com um atalho para escolher os jogos do seu perfil.',
+    'O mini-perfil (ao passar o mouse em alguém) mostra os jogos favoritos da Steam e quantos jogos a pessoa tem.',
   ],
   fixes: [],
 } satisfies Release;

@@ -3179,6 +3179,10 @@ registerIntegrationRoutes(api, {
     if (user) emitToUser(userId, 'me:updated', meJson(user));
   },
   canSee: canSeeProfile,
+  steamShowcase: (userId) => {
+    const page = pageJson(parseStyle(get<UserRow>('SELECT profile_style FROM users WHERE id = ?', userId)?.profile_style).page);
+    return { featured: page.featured, visible: page.showcases.includes('steam') };
+  },
 });
 
 // ============================================================ Página do perfil
