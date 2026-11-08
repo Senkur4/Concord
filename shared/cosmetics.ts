@@ -23,6 +23,10 @@ export type FrameId = (typeof FRAMES)[number];
 export const CARD_FRAMES = ['christmas'] as const;
 export type CardFrameId = (typeof CARD_FRAMES)[number];
 
+/** Divisor do mini perfil: decoração na linha entre a capa e as informações. */
+export const CARD_DIVIDERS = ['lights', 'snow'] as const;
+export type CardDividerId = (typeof CARD_DIVIDERS)[number];
+
 /** Patches "costurados" no cartão de perfil. */
 export const PATCH_SHAPES = ['circle', 'shield', 'rect', 'hex', 'star', 'banner'] as const;
 export type PatchShape = (typeof PATCH_SHAPES)[number];

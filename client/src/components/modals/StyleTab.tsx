@@ -1,6 +1,6 @@
 import { Check, Copy, Crosshair, Gift, ImagePlus, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { CARD_FRAMES, FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
+import { CARD_DIVIDERS, CARD_FRAMES, FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
 import { api } from '../../lib/api';
 import type { Me, Member, Patch, Presence, ServerPatch, ServerSummary } from '../../lib/types';
 import { pickImage, prepareImage, uploadImage } from '../../lib/upload';
@@ -13,6 +13,7 @@ import { Avatar, Button, cx } from '../ui';
 import { cardLook } from '../../lib/cardBg';
 import { MiniProfileBody } from '../MemberPopover';
 import { CARD_FRAME_LABELS, CardFrame } from '../CardFrame';
+import { CARD_DIVIDER_LABELS, CardDivider } from '../CardDivider';
 import { PinterestButton, PinterestPicker } from '../PinterestPicker';
 
 const FRAME_NAMES: Record<string, string> = {
@@ -55,6 +56,14 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
   async function setFrame(frame: string | null) {
     try {
       setMe(await api.patch<Me>('/me/style', { frame }));
+    } catch (err) {
+      toast.error(err);
+    }
+  }
+
+  async function setCardDivider(cardDivider: string | null) {
+    try {
+      setMe(await api.patch<Me>('/me/style', { cardDivider }));
     } catch (err) {
       toast.error(err);
     }
@@ -122,6 +131,21 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
           {CARD_FRAMES.map((f) => (
             <FrameOption key={f} label={CARD_FRAME_LABELS[f] ?? f} active={me.cardFrame === f} onClick={() => void setCardFrame(f)}>
               <MiniCardThumb me={me} frame={f} />
+            </FrameOption>
+          ))}
+        </div>
+      </section>
+
+      {/* divisor do mini perfil */}
+      <section>
+        <Title hint="Decoração na linha entre a capa e as suas informações.">Divisor de Mini-Perfil</Title>
+        <div className="flex flex-wrap gap-2">
+          <FrameOption label="Nenhum" active={!me.cardDivider} onClick={() => void setCardDivider(null)}>
+            <MiniCardThumb me={me} frame={null} divider={null} />
+          </FrameOption>
+          {CARD_DIVIDERS.map((d) => (
+            <FrameOption key={d} label={CARD_DIVIDER_LABELS[d] ?? d} active={me.cardDivider === d} onClick={() => void setCardDivider(d)}>
+              <MiniCardThumb me={me} frame={null} divider={d} />
             </FrameOption>
           ))}
         </div>
@@ -416,19 +440,23 @@ function CombinedPositioner() {
 }
 
 /** Cartãozinho de amostra (capa + foto + linhas) para escolher a moldura do mini perfil. */
-function MiniCardThumb({ me, frame }: { me: Me; frame: string | null }) {
+function MiniCardThumb({ me, frame, divider }: { me: Me; frame: string | null; divider?: string | null }) {
   const name = me.displayName || me.username;
   const look = cardLook(me);
   return (
     <div className="relative m-2 h-[92px] w-[68px]">
       <CardFrame frame={frame} scale={0.5} />
       <div className="h-full w-full overflow-hidden rounded-[12px] bg-popover bg-cover bg-center ring-1 ring-line" style={look.style}>
-        {look.bannerUrl ? (
-          <img src={look.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" style={{ objectPosition: look.bannerPosition }} />
-        ) : (
-          <div className="h-[22px]" style={look.hasImage ? undefined : { background: me.bannerColor ?? me.avatarColor }} />
-        )}
-        <div className="-mt-3 px-1.5">
+        <div className="relative">
+          {look.bannerUrl ? (
+            <img src={look.bannerUrl} alt="" className="block aspect-[3/1] w-full object-cover" style={{ objectPosition: look.bannerPosition }} />
+          ) : (
+            <div className="h-[22px]" style={look.hasImage ? undefined : { background: me.bannerColor ?? me.avatarColor }} />
+          )}
+          {/* sem divisor escolhido, usa o da pessoa (a amostra mostra como fica de verdade) */}
+          <CardDivider kind={divider === undefined ? me.cardDivider : divider} scale={0.42} />
+        </div>
+        <div className="relative z-[2] -mt-3 px-1.5">
           <Avatar name={name} color={me.avatarColor} src={me.avatarUrl} size={24} />
           <div className="mt-1.5 h-1.5 w-10 rounded-full bg-fg/60" />
           <div className="mt-1 h-1 w-7 rounded-full bg-fg/30" />

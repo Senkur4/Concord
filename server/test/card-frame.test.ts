@@ -40,4 +40,15 @@ describe('moldura do mini perfil', () => {
     const members = (await amigo.get(`/servers/${serverId}`)).body.members as { id: string; cardFrame: string | null }[];
     assert.equal(members.find((m) => m.id === dono.id)!.cardFrame, 'christmas');
   });
+
+  it('divisor: pisca-pisca e neve, e recusa os que não existem', async () => {
+    const me = await signUp(server, 'divisor');
+    for (const d of ['lights', 'snow']) {
+      const res = await me.patch('/me/style', { cardDivider: d });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.cardDivider, d);
+    }
+    assert.equal((await me.patch('/me/style', { cardDivider: 'fire' })).status, 400);
+    assert.equal((await me.patch('/me/style', { cardDivider: null })).body.cardDivider, null);
+  });
 });

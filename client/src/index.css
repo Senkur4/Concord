@@ -738,3 +738,23 @@ video::-webkit-media-controls {
 @media (prefers-reduced-motion: reduce) {
   .xmas-bulb, .xmas-glow { animation: none; }
 }
+
+/* divisor do mini perfil "Neve": flocos caindo até o monte e brilhinhos */
+@keyframes divider-fall {
+  0% { transform: translateY(0); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(var(--fall)); opacity: 0; }
+}
+@keyframes divider-sparkle {
+  0%, 100% { opacity: 0.15; scale: 0.6; }
+  50% { opacity: 1; scale: 1.15; }
+}
+.divider-flake { animation: divider-fall 3s linear infinite; }
+.divider-sparkle { transform-box: fill-box; transform-origin: center; animation: divider-sparkle 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .divider-flake { display: none; }
+  .divider-sparkle { animation: none; }
+}
+:root[data-motion='reduce'] .divider-flake { display: none; }
+:root[data-motion='reduce'] .divider-sparkle { animation: none; }

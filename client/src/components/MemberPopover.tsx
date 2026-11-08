@@ -15,6 +15,7 @@ import { usePatchInspect } from '../store/patchInspect';
 import { cardLook } from '../lib/cardBg';
 import { ColoredName } from './ColoredName';
 import { CardFrame } from './CardFrame';
+import { CardDivider } from './CardDivider';
 
 export function MemberPopover() {
   const { userId, serverId, x, y, close } = usePopover();
@@ -374,6 +375,8 @@ export function MiniProfileBody({
   const detail = { server: { id: serverId ?? '', ownerId } };
   return (
     <>
+      {/* capa + divisor do mini perfil na borda de baixo dela */}
+      <div className="relative">
       {look.combined ? (
         // capa com fundo: a imagem do cartão aparece aqui em cima; clicar mostra a imagem inteira
         <button
@@ -398,8 +401,10 @@ export function MiniProfileBody({
       ) : (
         <div className="h-16" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />
       )}
+        <CardDivider kind={member.cardDivider} />
+      </div>
       <div className="px-4 pb-4">
-        <div className="-mt-9 mb-2 flex items-end justify-between gap-2">
+        <div className="relative z-[2] -mt-9 mb-2 flex items-end justify-between gap-2">
           <button
             aria-label={member.avatarUrl ? 'Ver foto em tamanho grande' : undefined}
             disabled={!member.avatarUrl}
@@ -407,7 +412,8 @@ export function MiniProfileBody({
               close();
               openModal({ type: 'image', src: member.avatarUrl!, alt: `Foto de ${name}` });
             }}
-            className="rounded-full enabled:cursor-zoom-in"
+            // fundo sólido: o divisor do mini perfil passa por trás da foto e não pode aparecer através dela
+            className="rounded-full bg-surface-1 enabled:cursor-zoom-in"
           >
             <Avatar name={name} color={member.avatarColor} src={member.avatarUrl} frame={member.frame} size={72} status={presence ?? 'offline'} className="rounded-full ring-[6px] ring-surface-1" />
           </button>

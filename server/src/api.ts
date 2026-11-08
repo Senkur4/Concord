@@ -83,6 +83,7 @@ import {
   ART_SCALE,
   FRAMES,
   CARD_FRAMES,
+  CARD_DIVIDERS,
   MAX_CUSTOM_STICKERS,
   MAX_PATCHES,
   MAX_PLACED_STICKERS,
@@ -91,6 +92,7 @@ import {
   STICKER_FINISHES,
   type FrameId,
   type CardFrameId,
+  type CardDividerId,
   type Patch,
 } from '../../shared/cosmetics.ts';
 import {
@@ -143,6 +145,8 @@ interface ProfileStyle {
   frame?: FrameId | null;
   /** moldura do mini perfil: decoração em volta do cartão inteiro */
   cardFrame?: CardFrameId | null;
+  /** divisor do mini perfil: decoração entre a capa e as informações */
+  cardDivider?: CardDividerId | null;
   cardBg?: string | null;
   /** "Capa com Fundo de Mini-Perfil": uma imagem só no cartão inteiro (no lugar da capa e do fundo) */
   combinedBg?: string | null;
@@ -198,6 +202,7 @@ function parseStyle(raw: string | null | undefined): ProfileStyle {
 const styleJson = (st: ProfileStyle) => ({
   frame: st.frame && (FRAMES as readonly string[]).includes(st.frame) ? st.frame : null,
   cardFrame: st.cardFrame && (CARD_FRAMES as readonly string[]).includes(st.cardFrame) ? st.cardFrame : null,
+  cardDivider: st.cardDivider && (CARD_DIVIDERS as readonly string[]).includes(st.cardDivider) ? st.cardDivider : null,
   cardBgUrl: st.cardBg ?? null,
   combinedBgUrl: st.combinedBg ?? null,
   combinedPos: cleanPos(st.combinedPos) ?? { x: 50, y: 30 },
@@ -1208,6 +1213,12 @@ api.patch('/me/style', (req, res) => {
     if (cardFrame !== null && !(CARD_FRAMES as readonly string[]).includes(cardFrame)) fail(400, 'Moldura do mini perfil inválida');
     style.cardFrame = cardFrame;
     nameChanged = true; // aparece no mini perfil que os outros abrem
+  }
+  if (req.body?.cardDivider !== undefined) {
+    const cardDivider = req.body.cardDivider;
+    if (cardDivider !== null && !(CARD_DIVIDERS as readonly string[]).includes(cardDivider)) fail(400, 'Divisor do mini perfil inválido');
+    style.cardDivider = cardDivider;
+    nameChanged = true;
   }
   for (const key of ['combinedPos', 'bannerPos', 'cardBgPos'] as const) {
     if (req.body?.[key] === undefined) continue;
