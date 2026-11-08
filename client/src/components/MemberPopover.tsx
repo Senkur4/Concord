@@ -452,10 +452,12 @@ export function MiniProfileBody({
               </button>
             )}
           </div>
-          <div className="text-sm text-fg-muted">
-            {member.nickname ? `${member.displayName} · ` : ''}@{member.username}
+          <div className="flex min-w-0 items-center gap-2 text-sm text-fg-muted">
+            <span className="truncate">
+              {member.nickname ? `${member.displayName} · ` : ''}@{member.username}
+            </span>
+            <Integrations userId={member.id} />
           </div>
-          <Integrations userId={member.id} />
           {member.mecenasBy && (
             <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-warn">
               <Gem size={12} /> Mecenas: @{member.mecenasBy}
@@ -631,14 +633,14 @@ function Integrations({ userId }: { userId: string }) {
   if (!steam?.linked) return null;
   const pill = (
     <>
-      <SteamLogo size={14} className="text-[#c7d5e0]" />
+      <SteamLogo size={11} className="text-[#c7d5e0]" />
       Steam
     </>
   );
   const cls =
-    'inline-flex h-6 items-center gap-1.5 rounded-full bg-linear-to-r from-[#171a21] to-[#2a475e] pr-2.5 pl-1.5 text-[11px] font-bold tracking-wide text-[#c7d5e0] ring-1 ring-white/10';
+    'inline-flex h-[18px] items-center gap-1 rounded-full bg-linear-to-r from-[#171a21] to-[#2a475e] pr-1.5 pl-1 text-[10px] leading-none font-bold text-[#c7d5e0] ring-1 ring-white/10';
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Contas conectadas">
+    <div className="flex shrink-0 gap-1" aria-label="Contas conectadas">
       {steam.profileUrl ? (
         <a href={steam.profileUrl} target="_blank" rel="noopener noreferrer" title="Abrir o perfil na Steam" className={cx(cls, 'transition hover:brightness-125')}>
           {pill}

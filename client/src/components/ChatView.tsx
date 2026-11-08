@@ -217,10 +217,18 @@ function Bubble({
   return (
     <div
       id={`msg-${message.id}`}
-      className={cx('group relative -mx-2 flex items-end gap-2.5 rounded-2xl px-2 transition-colors duration-500', grouped && !message.replyTo ? 'mt-1' : 'mt-4')}
+      className={cx('group relative -mx-2 grid items-start gap-x-2.5 rounded-2xl px-2 transition-colors duration-500', grouped && !message.replyTo ? 'mt-1' : 'mt-4')}
+      style={{ gridTemplateColumns: `${size}px minmax(0, 1fr)` }}
     >
       {actions}
-      <div className="shrink-0" style={{ width: size }}>
+      {/* resposta e "encaminhada" ficam acima da linha do nome, como no Discord */}
+      {(message.replyTo || forwarded) && (
+        <div className="col-start-2 flex min-w-0 flex-col items-start">
+          {message.replyTo && <ReplyQuote reply={message.replyTo} nameOf={nameOf} />}
+          {forwarded && <ForwardedTag forwarded={forwarded} />}
+        </div>
+      )}
+      <div className="col-start-1">
         {(!grouped || message.replyTo) && (
           <button
             aria-label={`Perfil de ${name}`}
@@ -230,16 +238,18 @@ function Bubble({
           </button>
         )}
       </div>
-      <div className={cx('flex min-w-0 flex-col items-start', compact ? 'max-w-[82%]' : 'max-w-[85%] md:max-w-[70%]')}>
-        {message.replyTo && <ReplyQuote reply={message.replyTo} nameOf={nameOf} />}
-        {forwarded && <ForwardedTag forwarded={forwarded} />}
+      <div className={cx('col-start-2 flex min-w-0 flex-col items-start', compact ? 'max-w-[82%]' : 'max-w-[85%] md:max-w-[70%]')}>
         {(!grouped || message.replyTo) && (
-          <div className="mb-1 flex items-baseline gap-2 px-1">
-            <span className="flex items-center gap-1 text-[13px] font-bold" style={{ color: memberColor(detail, message.author.id) }}>
+          // o nome fica na altura do topo da foto (no Discord é assim), maior que antes
+          <div className={cx('flex items-baseline gap-2 px-1 leading-tight', compact ? 'mb-1' : 'mb-1.5')}>
+            <span
+              className={cx('flex items-center gap-1 font-semibold', compact ? 'text-[15px]' : 'text-base')}
+              style={{ color: memberColor(detail, message.author.id) }}
+            >
               {name}
-              {verified && <VerifiedBadge size={13} />}
+              {verified && <VerifiedBadge size={compact ? 14 : 15} />}
             </span>
-            <span className="text-[11px] text-fg-subtle">{time}</span>
+            <span className="text-xs text-fg-subtle">{time}</span>
           </div>
         )}
         {editing ? (
