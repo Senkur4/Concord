@@ -8,6 +8,7 @@ import express, { type Router } from 'express';
 import { config } from './config.ts';
 import { get, run, type UserRow } from './db.ts';
 import { fail, uid } from './http.ts';
+import { limiter } from './recovery.ts';
 
 const CACHE_MS = 10 * 60_000;
 const cache = new Map<string, { at: number; value: unknown }>();
@@ -96,7 +97,59 @@ async function steamLibrary(steamId: string) {
 // ------------------------------------------------------------------ rotas
 
 /** Rotas sem login no Concord: a volta do login da Steam chega pelo navegador, sem o token. */
+// ------------------------------------------------------------------ arte dos jogos
+// Os jogos mais novos da Steam não têm mais a imagem no endereço antigo (cdn.../steam/apps/ID/header.jpg): o endereço
+// agora tem um código no meio, que só a loja sabe. Quando a imagem antiga falha, o navegador pede aqui, e o servidor
+// pergunta à loja (appdetails) qual é o endereço certo e redireciona. Guarda a resposta para não perguntar de novo.
+const ART_TTL = 24 * 60 * 60_000;
+const artCache = new Map<number, { at: number; url: string | null }>();
+const artPending = new Map<number, Promise<string | null>>();
+const artLookups = limiter(150, 5 * 60_000);
+
+async function steamHeaderArt(appid: number): Promise<string | null> {
+  const hit = artCache.get(appid);
+  if (hit && Date.now() - hit.at < ART_TTL) return hit.url;
+  let pending = artPending.get(appid);
+  if (!pending && !artLookups('steam')) return null; // a loja limita perguntas: segura um pouco
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const data = (await getJson(`https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic`)) as Record<
+          string,
+          { success?: boolean; data?: { header_image?: string; capsule_image?: string } }
+        >;
+        const d = data[String(appid)];
+        const url = d?.success ? (d.data?.header_image ?? d.data?.capsule_image ?? null) : null;
+        // só endereços da própria Steam
+        const safe = url && /^https:\/\/[\w.-]*(steamstatic\.com|steampowered\.com|akamaihd\.net)\//.test(url) ? url : null;
+        if (artCache.size > 5000) artCache.clear();
+        artCache.set(appid, { at: Date.now(), url: safe });
+        return safe;
+      } catch {
+        return null; // a loja não respondeu (ou limitou): não guarda, tenta de novo outra hora
+      } finally {
+        artPending.delete(appid);
+      }
+    })();
+    artPending.set(appid, pending);
+  }
+  return pending;
+}
+
 export function registerPublicIntegrationRoutes(api: Router, hooks: { meUpdated: (userId: string) => void }) {
+  // <img> não manda o token: esta rota é pública e só redireciona para imagens da Steam
+  api.get('/steam/art/:appid', async (req, res) => {
+    const appid = Number(req.params.appid);
+    if (!Number.isInteger(appid) || appid <= 0 || appid > 1e8) return res.status(404).end();
+    const url = await steamHeaderArt(appid);
+    if (!url) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.status(404).end();
+    }
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.redirect(302, url);
+  });
+
   api.get('/steam/callback', async (req, res) => {
     const q = req.query as Record<string, string>;
     const state = steamStates.get(String(q.state ?? ''));

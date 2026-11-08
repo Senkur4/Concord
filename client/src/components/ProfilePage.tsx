@@ -48,6 +48,7 @@ interface SteamGame {
   name: string;
   playtimeMin: number;
   playtime2wMin: number;
+  icon?: string | null;
 }
 
 interface SteamData {
@@ -59,6 +60,41 @@ interface SteamData {
 
 const steamArt = (appid: number, kind: 'portrait' | 'hero' | 'header') =>
   `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/${kind === 'portrait' ? 'library_600x900' : kind === 'hero' ? 'library_hero' : 'header'}.jpg`;
+
+/**
+ * Endereços para tentar, em ordem. Jogos novos não têm a arte no endereço antigo da Steam: tenta o novo e, por
+ * último, pergunta ao servidor (que descobre o endereço certo na loja). Em pé: se não tiver, cai na larga.
+ */
+function steamArtChain(appid: number, kind: 'portrait' | 'header'): string[] {
+  const header = [
+    steamArt(appid, 'header'),
+    `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg`,
+    `/api/steam/art/${appid}`,
+  ];
+  if (kind === 'header') return header;
+  return [steamArt(appid, 'portrait'), `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appid}/library_600x900.jpg`, ...header];
+}
+
+/** Imagem do jogo que vai tentando os endereços; sem nenhum, mostra o ícone do jogo ou a inicial do nome. */
+function SteamArt({ game, kind, className, fallbackText }: { game: SteamGame; kind: 'portrait' | 'header'; className: string; fallbackText?: 'name' | 'initial' }) {
+  const chain = steamArtChain(game.appid, kind);
+  const [step, setStep] = useState(0);
+  const [iconBroken, setIconBroken] = useState(false);
+  if (step < chain.length) {
+    return <img src={chain[step]} alt="" loading="lazy" onError={() => setStep(step + 1)} className={cx(className, 'object-cover')} />;
+  }
+  return (
+    <div className={cx(className, 'flex items-center justify-center overflow-hidden bg-linear-to-br from-surface-4 to-surface-2')}>
+      {game.icon && !iconBroken ? (
+        <img src={game.icon} alt="" onError={() => setIconBroken(true)} className="h-[55%] max-h-16 rounded-md object-contain" />
+      ) : fallbackText === 'name' ? (
+        <span className="p-3 text-center font-display text-sm font-bold text-fg-muted">{game.name}</span>
+      ) : (
+        <span className="font-display text-lg font-bold text-fg-muted">{game.name.trim().charAt(0).toUpperCase()}</span>
+      )}
+    </div>
+  );
+}
 const hours = (min: number) => (min < 60 ? `${min} min` : `${Math.round(min / 60).toLocaleString('pt-BR')} h`);
 
 function useJson<T>(path: string | null, deps: unknown[] = []) {
@@ -354,22 +390,11 @@ function Stats({ user, games, common, patches }: { user: User & { createdAt: num
 
 // ------------------------------------------------------------------ jogos
 
-function Cover({ game, big }: { game: SteamGame; big?: boolean }) {
-  // capa em pé; se o jogo não tiver, a larga; se nem essa, o nome
-  const [step, setStep] = useState<'portrait' | 'header' | 'none'>('portrait');
+function Cover({ game }: { game: SteamGame; big?: boolean }) {
+  // capa em pé; se o jogo não tiver, a larga; se nem essa, o ícone ou o nome
   return (
     <div className="absolute inset-0 bg-surface-3">
-      {step !== 'none' ? (
-        <img
-          src={steamArt(game.appid, step)}
-          alt=""
-          loading="lazy"
-          onError={() => setStep(step === 'portrait' ? 'header' : 'none')}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <div className={cx('flex h-full items-center justify-center p-3 text-center font-display font-bold text-fg-muted', big ? 'text-2xl' : 'text-sm')}>{game.name}</div>
-      )}
+      <SteamArt game={game} kind="portrait" fallbackText="name" className="h-full w-full" />
     </div>
   );
 }
@@ -465,7 +490,7 @@ function MostPlayed({ games, profileUrl, own }: { games: SteamGame[]; profileUrl
           {top.map((g) => (
             <li key={g.appid}>
               <a href={`https://store.steampowered.com/app/${g.appid}`} target="_blank" rel="noreferrer noopener" className="grid grid-cols-[72px_minmax(0,1fr)_72px] items-center gap-4">
-                <img src={steamArt(g.appid, 'header')} alt="" loading="lazy" className="aspect-[460/215] w-full rounded-md bg-surface-3 object-cover" />
+                <SteamArt game={g} kind="header" className="aspect-[460/215] w-full rounded-md bg-surface-3" />
                 <span className="flex min-w-0 flex-col gap-1.5">
                   <span className="truncate text-[15px] font-bold">{g.name}</span>
                   <span className="h-1 rounded-full bg-white/8">
@@ -694,7 +719,7 @@ function FeaturedPicker({ games, current, onSaved, onClose }: { games: SteamGame
                   <span className={cx('flex h-5 w-5 items-center justify-center rounded-md border-2', on ? 'border-accent bg-accent text-on-accent' : 'border-line-strong')}>
                     {on && <Check size={13} strokeWidth={3} />}
                   </span>
-                  <img src={steamArt(g.appid, 'header')} alt="" loading="lazy" className="aspect-[460/215] w-full rounded-lg bg-surface-3 object-cover" />
+                  <SteamArt game={g} kind="header" className="aspect-[460/215] w-full rounded-lg bg-surface-3" />
                   <span className="truncate text-[15px] font-bold">{g.name}</span>
                   <span className="text-right font-display font-semibold text-fg-subtle tabular-nums">{hours(g.playtimeMin)}</span>
                 </button>
@@ -800,7 +825,7 @@ function CoverGamePicker({ games, current, onSaved, onClose }: { games: SteamGam
                   current === g.appid ? 'bg-accent/10' : 'hover:bg-surface-3',
                 )}
               >
-                <img src={steamArt(g.appid, 'header')} alt="" loading="lazy" className="aspect-[460/215] w-full rounded-lg bg-surface-3 object-cover" />
+                <SteamArt game={g} kind="header" className="aspect-[460/215] w-full rounded-lg bg-surface-3" />
                 <span className="truncate text-[15px] font-bold">{g.name}</span>
                 <span className="text-right font-display font-semibold text-fg-subtle tabular-nums">{hours(g.playtimeMin)}</span>
               </button>

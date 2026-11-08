@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { PACK_STICKER_MAX_BYTES } from '../../shared/cosmetics.ts';
 import { config } from './config.ts';
@@ -109,4 +109,18 @@ export function removeUpload(url: string | null | undefined) {
   } catch {
     // já removido
   }
+}
+
+/** Cópia de um anexo (para encaminhar a mensagem): apagar a original não leva o arquivo da cópia junto. */
+export function copyAttachmentFile(url: string, owner: string): string | null {
+  const m = url.match(/^\/uploads\/files\/([\w-]+)\.([a-z0-9]{1,5})$/i);
+  if (!m) return null;
+  const dir = join(config.uploadsDir, 'files');
+  const name = `${owner}-${randomBytes(16).toString('hex')}.${m[2].toLowerCase()}`;
+  try {
+    copyFileSync(join(dir, basename(`${m[1]}.${m[2]}`)), join(dir, name));
+  } catch {
+    return null; // o arquivo original já não existe
+  }
+  return `/uploads/files/${name}`;
 }

@@ -18,6 +18,7 @@ import { StickerButton, StickerMessage } from './StickerPicker';
 import { ComposerEmojiButton, insertAtCursor } from './EmojiCatalog';
 import { JamCard, useJamInMessage } from './Jam';
 import { ReplyBar, ReplyQuote, startReply } from './Replies';
+import { CopyTextButton, ForwardButton, ForwardedTag, canForward, forwardedOf } from './Forward';
 import { MobileBackButton } from './MobileNav';
 
 const EMPTY: Message[] = [];
@@ -188,7 +189,8 @@ function Bubble({
     return m ? memberName(m) : fallback;
   };
 
-  const actions = !editing && (canReply || mine || canDelete) && (
+  const forwarded = forwardedOf(message);
+  const actions = !editing && (
     // barrinha flutuante no canto direito da linha: não ocupa espaço, não fica espremida no chat estreito
     // da sala e não cobre o nome nem a citação de mensagens curtas
     <div className="absolute -top-4 right-2 z-10 flex items-center gap-0.5 rounded-full bg-popover p-0.5 opacity-0 shadow-lg ring-1 ring-line transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -197,7 +199,9 @@ function Bubble({
           <Reply size={14} />
         </IconButton>
       )}
-      {mine && (message.kind ?? 'text') === 'text' && (
+      {canForward(message) && <ForwardButton type="channel" message={message} />}
+      {(message.kind ?? 'text') === 'text' && message.content && <CopyTextButton text={message.content} />}
+      {mine && (message.kind ?? 'text') === 'text' && !forwarded && (
         <IconButton label="Editar" className="h-8 w-8" onClick={() => { setDraft(message.content); setEditing(true); }}>
           <Pencil size={14} />
         </IconButton>
@@ -228,6 +232,7 @@ function Bubble({
       </div>
       <div className={cx('flex min-w-0 flex-col items-start', compact ? 'max-w-[82%]' : 'max-w-[85%] md:max-w-[70%]')}>
         {message.replyTo && <ReplyQuote reply={message.replyTo} nameOf={nameOf} />}
+        {forwarded && <ForwardedTag forwarded={forwarded} />}
         {(!grouped || message.replyTo) && (
           <div className="mb-1 flex items-baseline gap-2 px-1">
             <span className="flex items-center gap-1 text-[13px] font-bold" style={{ color: memberColor(detail, message.author.id) }}>

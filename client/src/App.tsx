@@ -34,6 +34,7 @@ import { useDevStatsPublisher } from './lib/devStats';
 import { setMotionPref } from './lib/motion';
 import { useVoice } from './store/voice';
 import './lib/visibility';
+import { ForwardHost } from './components/Forward';
 
 const PATH = location.pathname.replace(/\/+$/, '');
 /** /diagnostico abre como janela/aba independente — ver lib/desktop.ts e lib/devStats.ts. */
@@ -140,6 +141,7 @@ function MainApp() {
       {me && <RecordingPill />}
       {me && <PatchInspectorHost />}
       {me && <SpotlightHost />}
+      {me && <ForwardHost />}
     </>
   );
 }

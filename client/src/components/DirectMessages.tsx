@@ -15,6 +15,7 @@ import { ReplyBar, ReplyQuote, startReply } from './Replies';
 import { MobileBackButton } from './MobileNav';
 import { Avatar, IconButton, Spinner, cx } from './ui';
 import { ComposerEmojiButton, insertAtCursor } from './EmojiCatalog';
+import { CopyTextButton, ForwardButton, ForwardedTag, canForward, forwardedOf } from './Forward';
 
 const EMPTY: Message[] = [];
 
@@ -252,12 +253,15 @@ function DmBubble({ message, grouped }: { message: Message; grouped: boolean }) 
   const time = new Date(message.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const nameOf = (authorId: string, fallback: string) => (authorId === me.id ? 'Você' : fallback);
 
+  const forwarded = forwardedOf(message);
   const actions = !editing && (
     <div className="absolute -top-4 right-2 z-10 flex items-center gap-0.5 rounded-full bg-popover p-0.5 opacity-0 shadow-lg ring-1 ring-line transition-opacity group-hover:opacity-100 focus-within:opacity-100">
       <IconButton label="Responder" className="h-8 w-8" onClick={() => startReply(message.channelId, message, 'dm-composer')}>
         <Reply size={14} />
       </IconButton>
-      {mine && (message.kind ?? 'text') === 'text' && (
+      {canForward(message) && <ForwardButton type="dm" message={message} />}
+      {(message.kind ?? 'text') === 'text' && message.content && <CopyTextButton text={message.content} />}
+      {mine && (message.kind ?? 'text') === 'text' && !forwarded && (
         <IconButton label="Editar" className="h-8 w-8" onClick={() => { setDraft(message.content); setEditing(true); }}>
           <Pencil size={14} />
         </IconButton>
@@ -296,6 +300,7 @@ function DmBubble({ message, grouped }: { message: Message; grouped: boolean }) 
       </div>
       <div className="flex max-w-[85%] min-w-0 flex-col items-start md:max-w-[70%]">
         {message.replyTo && <ReplyQuote reply={message.replyTo} nameOf={nameOf} />}
+        {forwarded && <ForwardedTag forwarded={forwarded} />}
         {(!grouped || message.replyTo) && (
           <div className="mb-1 flex items-baseline gap-2 px-1">
             <span className="text-[13px] font-bold">{message.author.displayName}</span>

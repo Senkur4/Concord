@@ -45,7 +45,7 @@ import {
 } from './db.ts';
 import { HttpError, color, fail, hashBotToken, humansOnly, int, optStr, requireAuth, signToken, str, uid, verifyToken } from './http.ts';
 import { TrackSource, createVoiceToken, muteTracks, removeFromRoom } from './livekit.ts';
-import { cleanFileName, removeUpload, saveAttachment, saveImage, saveSound } from './uploads.ts';
+import { cleanFileName, copyAttachmentFile, removeUpload, saveAttachment, saveImage, saveSound } from './uploads.ts';
 import { allowAttempt, clientIp, limiter, loginWaitMinutes, normalize as normalizeCode, recordLoginFailure, rotateRecoveryCode } from './recovery.ts';
 import { isEmail, mailEnabled, maskEmail, sendEmailChanged, sendPasswordChanged, sendResetEmail, sendSignupCode, sendVerifyEmail } from './mail.ts';
 import { EMAIL_PROVIDER_NAMES, emailDomainAllowed, emailKey } from '../../shared/email.ts';
@@ -2400,6 +2400,7 @@ api.patch('/messages/:id', async (req, res) => {
   const msg = get<MessageRow>('SELECT * FROM messages WHERE id = ?', req.params.id) ?? fail(404, 'Mensagem não encontrada');
   if (msg.author_id !== me) fail(403, 'Você só pode editar suas mensagens');
   if (msg.kind !== 'text') fail(400, 'Mensagens de jogo não podem ser editadas');
+  if (msg.data?.includes('"forwarded"')) fail(400, 'Mensagens encaminhadas não podem ser editadas');
   const channel = requireChannelPerm(msg.channel_id, me, P.SEND_MESSAGES);
   run('UPDATE messages SET content = ?, edited_at = ? WHERE id = ?', messageContent(req.body?.content, !!msg.attachments), now(), msg.id);
   const updated = messageJson(get<MessageWithAuthor>(`${MESSAGE_SELECT} WHERE m.id = ?`, msg.id)!);
@@ -3040,11 +3041,12 @@ api.post('/dms/:id/read', (req, res) => {
 
 api.patch('/dm-messages/:id', (req, res) => {
   const me = uid(res);
-  const row = get<{ dm_id: string; author_id: string; kind: string; attachments: string | null }>(
-    'SELECT dm_id, author_id, kind, attachments FROM dm_messages WHERE id = ?',
+  const row = get<{ dm_id: string; author_id: string; kind: string; data: string | null; attachments: string | null }>(
+    'SELECT dm_id, author_id, kind, data, attachments FROM dm_messages WHERE id = ?',
     req.params.id,
   );
   if (!row || row.author_id !== me || row.kind !== 'text') fail(404, 'Mensagem não encontrada');
+  if (row!.data?.includes('"forwarded"')) fail(400, 'Mensagens encaminhadas não podem ser editadas');
   const dm = requireDm(row!.dm_id, me);
   run('UPDATE dm_messages SET content = ?, edited_at = ? WHERE id = ?', messageContent(req.body?.content, !!row!.attachments), now(), req.params.id);
   const msg = messageJson(get<MessageWithAuthor>(`${DM_SELECT} WHERE m.id = ?`, req.params.id)!);
@@ -3061,6 +3063,105 @@ api.delete('/dm-messages/:id', (req, res) => {
   deleteAttachments(req.params.id);
   deliverDm(dm, 'dm:delete', { id: req.params.id, channelId: dm.id });
   res.json({ ok: true });
+});
+
+// ============================================================ Encaminhar mensagem
+
+/**
+ * Encaminha uma mensagem (de um canal ou de uma conversa privada) para até 5 conversas. A cópia leva o texto, os
+ * anexos (copiados: apagar a original não estraga a cópia) e uma marca "encaminhada" com quem escreveu e de onde veio.
+ * Não avisa menções de novo.
+ */
+const MAX_FORWARD = 5;
+api.post('/forward', (req, res) => {
+  const me = uid(res);
+  const src = req.body?.source as { type?: unknown; messageId?: unknown } | undefined;
+  const targets = req.body?.targets as { type?: unknown; id?: unknown }[] | undefined;
+  if (!src || (src.type !== 'channel' && src.type !== 'dm') || typeof src.messageId !== 'string') fail(400, 'Mensagem inválida');
+  if (!Array.isArray(targets) || !targets.length) fail(400, 'Escolha para onde encaminhar');
+  if (targets!.length > MAX_FORWARD) fail(400, `Dá para encaminhar para até ${MAX_FORWARD} conversas de uma vez`);
+
+  // a mensagem original: precisa conseguir vê-la
+  let row: MessageWithAuthor | undefined;
+  let from: string;
+  if (src!.type === 'channel') {
+    row = get<MessageWithAuthor>(`${MESSAGE_SELECT} WHERE m.id = ?`, src!.messageId as string);
+    if (!row) fail(404, 'Mensagem não encontrada');
+    const channel = requireChannelPerm(row!.channel_id, me, P.VIEW_CHANNEL);
+    const server = get<{ name: string }>('SELECT name FROM servers WHERE id = ?', channel.server_id);
+    from = `#${channel.name}${server ? ` · ${server.name}` : ''}`;
+  } else {
+    row = get<MessageWithAuthor>(`${DM_SELECT} WHERE m.id = ?`, src!.messageId as string);
+    if (!row) fail(404, 'Mensagem não encontrada');
+    requireDm(row!.channel_id, me);
+    from = 'Conversa privada';
+  }
+  const original = row!;
+  const kind = original.kind ?? 'text';
+  if (kind !== 'text' && kind !== 'sticker') fail(400, 'Esse tipo de mensagem não dá para encaminhar');
+  const originalData = (parseData(original.data) as Record<string, unknown> | null) ?? {};
+  // encaminhar uma encaminhada mantém o autor e a origem de verdade
+  const forwarded = (originalData.forwarded as Record<string, unknown> | undefined) ?? {
+    authorId: original.author_id,
+    authorName: original.display_name,
+    from,
+    at: original.created_at,
+  };
+  const data = { ...originalData, forwarded };
+  const files = (parseData(original.attachments ?? null) as AttachmentJson[] | null) ?? [];
+
+  // confere todos os destinos antes de mandar para qualquer um
+  const seen = new Set<string>();
+  const resolved = targets!.map((t) => {
+    if ((t.type !== 'channel' && t.type !== 'dm') || typeof t.id !== 'string') fail(400, 'Destino inválido');
+    const key = `${t.type}:${t.id}`;
+    if (seen.has(key)) fail(400, 'Destino repetido');
+    seen.add(key);
+    if (t.type === 'dm') return { type: 'dm' as const, dm: requireDm(t.id as string, me) };
+    const channel = requireChannelPerm(t.id as string, me, P.SEND_MESSAGES);
+    if (channel.type === 'forum') fail(400, 'Num fórum não dá para encaminhar (crie um post)');
+    return { type: 'channel' as const, channel };
+  });
+
+  const copyFiles = () => {
+    const rows: AttachmentRow[] = [];
+    for (const f of files) {
+      const url = copyAttachmentFile(f.url, me);
+      if (!url) continue;
+      const r: AttachmentRow = { id: randomUUID(), uploader_id: me, url, name: f.name, size: f.size, image: f.image ? 1 : 0, message_id: null, created_at: now() };
+      run('INSERT INTO attachments (id, uploader_id, url, name, size, image, message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)', r.id, me, r.url, r.name, r.size, r.image, r.created_at);
+      rows.push(r);
+    }
+    return rows;
+  };
+
+  let sent = 0;
+  for (const t of resolved) {
+    requireMessageQuota(me);
+    const rows = copyFiles();
+    if (!original.content && !rows.length && kind === 'text') continue; // só tinha anexos e eles sumiram
+    if (t.type === 'dm') {
+      insertDmMessage(t.dm, me, original.content, kind, data, rows);
+    } else {
+      const id = randomUUID();
+      run(
+        'INSERT INTO messages (id, channel_id, author_id, content, kind, data, attachments, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        id,
+        t.channel.id,
+        me,
+        original.content,
+        kind,
+        JSON.stringify(data),
+        attachmentsField(rows),
+        now(),
+      );
+      claimAttachments(rows, id);
+      void emitToChannel(t.channel, 'message:new', messageJson(get<MessageWithAuthor>(`${MESSAGE_SELECT} WHERE m.id = ?`, id)!));
+    }
+    sent++;
+  }
+  if (!sent) fail(410, 'Os anexos dessa mensagem não existem mais');
+  res.json({ ok: true, sent });
 });
 
 // ============================================================ E-mail de recuperação
