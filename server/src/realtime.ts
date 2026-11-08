@@ -241,10 +241,41 @@ function sanitizeActivities(raw: unknown): Activity[] {
   return out;
 }
 
+// ---- atividade vinda do detector de jogos (o .bat de Privacidade, para quem usa o Concord no navegador).
+// O detector manda a cada 15 s; sem notícia por 45 s (fechou o detector, desligou o PC), a atividade some.
+const EXTERNAL_TTL = 45_000;
+const externalActivities = new Map<string, { list: Activity[]; until: number }>();
+
+const stripActivities = (list: Activity[]) => list.map(({ type, name, details }) => ({ type, name, details }));
+
+/** Atividade mandada pelo detector de jogos. */
+export function setExternalActivities(userId: string, raw: unknown) {
+  const next = sanitizeActivities(raw);
+  const current = externalActivities.get(userId)?.list ?? [];
+  const list = next.map((a) => {
+    const prev = current.find((p) => p.type === a.type && p.name === a.name);
+    return prev ? { ...a, since: prev.since } : a;
+  });
+  if (list.length) externalActivities.set(userId, { list, until: Date.now() + EXTERNAL_TTL });
+  else externalActivities.delete(userId);
+  if (JSON.stringify(stripActivities(list)) !== JSON.stringify(stripActivities(current)) && online.has(userId)) {
+    io?.emit('presence', presenceOf(userId));
+  }
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, e] of externalActivities) {
+    if (e.until > now) continue;
+    externalActivities.delete(userId);
+    if (online.has(userId)) io?.emit('presence', presenceOf(userId));
+  }
+}, 15_000).unref();
+
 /** Status, frase personalizada e atividades (até 2) de um usuário online. */
 export function presenceOf(userId: string) {
   const row = get<{ settings: string }>('SELECT settings FROM users WHERE id = ?', userId);
-  let settings: { status?: string; customStatus?: unknown } = {};
+  let settings: { status?: string; customStatus?: unknown; shareActivity?: unknown } = {};
   try {
     settings = JSON.parse(row?.settings || '{}');
   } catch {
@@ -255,8 +286,15 @@ export function presenceOf(userId: string) {
     online: true,
     status: (settings.status === 'dnd' ? 'dnd' : 'online') as PresenceStatus,
     customStatus: typeof settings.customStatus === 'string' ? settings.customStatus.slice(0, 80) : '',
-    activities: activities.get(userId) ?? [],
+    activities: mergedActivities(userId, settings.shareActivity !== false),
   };
+}
+
+/** As do app desktop primeiro; o detector completa o que faltar (um jogo e uma música, no máximo 2). */
+function mergedActivities(userId: string, share: boolean): Activity[] {
+  const own = activities.get(userId) ?? [];
+  const ext = share ? (externalActivities.get(userId)?.list ?? []) : [];
+  return [...own, ...ext.filter((e) => !own.some((o) => o.type === e.type))].slice(0, 2);
 }
 
 export function isOnline(userId: string) {

@@ -53,6 +53,7 @@ import { SIGNUP_LIMITED, captchaSiteKey, emailRequired, requireCaptcha, signupAl
 import { playGame } from './games.ts';
 import { isAdmin, registerAdminRoutes } from './admin.ts';
 import { integrationsStatus, registerIntegrationRoutes, registerPublicIntegrationRoutes } from './integrations.ts';
+import { registerPresenceRoutes, registerPublicPresenceRoutes } from './presence.ts';
 import {
   avatarLocked,
   mecenasBadge,
@@ -900,6 +901,9 @@ registerPublicIntegrationRoutes(api, {
     if (user) emitToUser(userId, 'me:updated', meJson(user));
   },
 });
+
+// o detector de jogos (Privacidade) se identifica com a própria chave, não com a sessão
+registerPublicPresenceRoutes(api);
 
 // o app pode quebrar antes do login, e o navegador manda o relatório da CSP sem token: ficam antes do requireAuth
 registerClientErrorRoutes(api);
@@ -3173,6 +3177,7 @@ registerDiagnosticRoutes(api);
 registerAdminRoutes(api);
 // depois do admin: as rotas /admin/contracts* ficam atrás do requireAdmin
 registerContractRoutes(api);
+registerPresenceRoutes(api);
 registerIntegrationRoutes(api, {
   meUpdated: (userId) => {
     const user = get<UserRow>('SELECT * FROM users WHERE id = ?', userId);

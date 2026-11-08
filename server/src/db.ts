@@ -301,6 +301,9 @@ addColumn('servers', 'group_labels', "TEXT NOT NULL DEFAULT '{}'");
 // ordem da barra lateral, misturando grupos padrão e categorias: ["group:voice", "cat:<id>", "group:text", ...].
 // Vazio = grupos padrão primeiro, depois as categorias.
 addColumn('servers', 'sidebar_order', "TEXT NOT NULL DEFAULT '[]'");
+// chave do detector de jogos (o .bat baixado em Privacidade): só serve para mandar a atividade; guardada com hash
+addColumn('users', 'presence_token_hash', 'TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_presence_token ON users(presence_token_hash) WHERE presence_token_hash IS NOT NULL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS forum_posts (

@@ -212,7 +212,16 @@ export function Privacy() {
             <DetectedActivity />
           </>
         ) : (
-          <p className="text-[13px] text-fg-muted">Mostrar o que você está jogando e ouvindo funciona no app para Windows.</p>
+          <>
+            <div className="flex items-center justify-between gap-6">
+              <div>
+                <div className="text-[15px] font-bold">Mostrar o que estou jogando e ouvindo</div>
+                <div className="text-[13px] text-fg-muted">Aparece no seu mini-perfil e na lista de membros, como no Discord. Pelo navegador, precisa do detector abaixo.</div>
+              </div>
+              <Toggle checked={me.settings.shareActivity !== false} onChange={(v) => void saveSettings({ shareActivity: v })} />
+            </div>
+            <GameDetector />
+          </>
         )}
       </section>
 
@@ -238,6 +247,59 @@ export function Privacy() {
         )}
         <p className="text-xs text-fg-subtle">Quem você silencia não fica sabendo: para essa pessoa, o chamado parece ter sido entregue.</p>
       </section>
+    </div>
+  );
+}
+
+/** Detector de jogos para quem usa o Concord no navegador: um .bat que fica rodando no Windows. */
+function GameDetector() {
+  const me = useApp((s) => s.me)!;
+  const mine = useApp((s) => s.online[me.id]?.activities) ?? [];
+  const [busy, setBusy] = useState(false);
+
+  async function download() {
+    setBusy(true);
+    try {
+      const { filename, content } = await api.post<{ filename: string; content: string }>('/me/presence-helper', {});
+      const url = URL.createObjectURL(new Blob([content], { type: 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      toast.success('Detector baixado. Abra o arquivo com dois cliques e deixe a janela aberta.');
+    } catch (err) {
+      toast.error(err);
+    }
+    setBusy(false);
+  }
+
+  const label = (a: Activity) => (a.type === 'playing' ? `Jogando ${a.name}` : `Ouvindo ${a.details ?? a.name}`);
+  return (
+    <div className="space-y-3 rounded-3xl bg-surface-0 p-4">
+      <div className="flex items-center gap-2 font-semibold">
+        <Gamepad2 size={18} className="text-accent" /> Detector de jogos (Windows)
+      </div>
+      <p className="text-sm text-fg-muted">
+        O navegador não consegue ver os programas abertos no seu PC. O detector é um arquivo pequeno que fica rodando numa janelinha e conta ao Concord o jogo aberto (os da Steam e milhares de outros) e a música do Spotify.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button loading={busy} onClick={() => void download()}>
+          Baixar o detector
+        </Button>
+        <Button variant="secondary" onClick={() => void api.del('/me/presence-helper').then(() => toast.success('Detector desligado.')).catch(toast.error)}>
+          Desligar o detector
+        </Button>
+      </div>
+      <ol className="list-decimal space-y-1 pl-5 text-xs text-fg-subtle">
+        <li>Abra o arquivo baixado com dois cliques. Se o Windows avisar, clique em "Mais informações" e depois em "Executar assim mesmo".</li>
+        <li>Deixe a janela aberta (pode minimizar). Fechou a janela, o detector para.</li>
+        <li>Para ligar sozinho com o PC: aperte Win + R, digite <code>shell:startup</code> e coloque o arquivo nessa pasta.</li>
+        <li>Baixar de novo desativa o arquivo anterior.</li>
+      </ol>
+      <div className="border-t border-line pt-3 text-sm text-fg-muted">
+        Aparecendo agora: <b className="text-fg">{mine.length ? mine.map(label).join(' · ') : 'nada'}</b>
+      </div>
     </div>
   );
 }
