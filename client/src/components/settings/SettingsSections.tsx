@@ -6,6 +6,7 @@ import { NOISE_MODES, micLevels, preloadDfn, startMicTest, type GateMode, type M
 import { systemReducesMotion } from '../../lib/motion';
 import { CardPreview, StyleTab } from '../modals/StyleTab';
 import { GoogleAccountSection } from '../GoogleLogin';
+import { PinterestBubble, PinterestPicker } from '../PinterestPicker';
 import { EmailSection } from '../EmailRecovery';
 import { TwoFactorCodeInput, TwoFactorSection } from '../TwoFactor';
 import { LocalRecordControls } from '../RecordControls';
@@ -66,8 +67,8 @@ export function MyProfile() {
   const dirty =
     name !== me.displayName || color !== me.avatarColor || banner !== me.bannerColor || bio !== me.bio || customStatus !== (me.settings.customStatus ?? '');
 
-  async function changeAvatar() {
-    const file = await pickImage();
+  async function changeAvatar(given?: File) {
+    const file = given ?? (await pickImage());
     if (!file) return;
     setUploading(true);
     try {
@@ -75,9 +76,14 @@ export function MyProfile() {
       toast.success('Foto de perfil atualizada');
     } catch (err) {
       toast.error(err);
+      if (given) {
+        setUploading(false);
+        throw err; // a janela do Pinterest fica aberta
+      }
     }
     setUploading(false);
   }
+  const [pinOpen, setPinOpen] = useState(false);
 
   async function save() {
     setSaving(true);
@@ -97,16 +103,17 @@ export function MyProfile() {
         <section className="space-y-5">
           <SectionTitle>Quem você é</SectionTitle>
           <div className="flex flex-wrap items-center gap-4">
-            <button onClick={changeAvatar} className="group relative rounded-full" title="Trocar foto (quadrada; GIF animado vale)">
+            <button onClick={() => void changeAvatar()} className="group relative rounded-full" title="Trocar foto (quadrada; GIF animado vale)">
               <Avatar name={name || me.username} color={color} src={me.avatarUrl} frame={me.frame} size={72} />
               <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100">
                 {uploading ? '…' : <ImagePlus size={20} />}
               </span>
             </button>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" className="h-9 px-4" onClick={changeAvatar} loading={uploading}>
+              <Button variant="secondary" className="h-9 px-4" onClick={() => void changeAvatar()} loading={uploading}>
                 Trocar foto
               </Button>
+              <PinterestBubble onClick={() => setPinOpen(true)} />
               {me.avatarUrl && (
                 <Button variant="ghost" className="h-9 px-3" onClick={() => void api.del<Me>('/me/avatar').then(setMe, toast.error)}>
                   Tirar foto
@@ -114,6 +121,9 @@ export function MyProfile() {
               )}
             </div>
           </div>
+          {pinOpen && (
+            <PinterestPicker title="Foto do Pinterest" target="Foto de perfil" onUse={(file) => changeAvatar(file)} onClose={() => setPinOpen(false)} />
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input label="Nome de exibição" value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
             <Input label="Status" value={customStatus} maxLength={80} placeholder="Ex.: volto às 22h" onChange={(e) => setCustomStatus(e.target.value)} />

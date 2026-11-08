@@ -12,6 +12,7 @@ import { ServerPatchesPanel, equipPatch, newPatchDraft } from '../ServerPatches'
 import { Avatar, Button, cx } from '../ui';
 import { cardLook } from '../../lib/cardBg';
 import { MiniProfileBody } from '../MemberPopover';
+import { PinterestButton, PinterestPicker } from '../PinterestPicker';
 
 const FRAME_NAMES: Record<string, string> = {
   neon: 'Neon',
@@ -46,7 +47,7 @@ function Title({ children, hint }: { children: React.ReactNode; hint?: string })
 export function StyleTab({ embedded = false }: { embedded?: boolean }) {
   const me = useApp((s) => s.me)!;
   const setMe = useApp((s) => s.setMe);
-  const [uploading, setUploading] = useState<'banner' | 'bg' | 'combined' | null>(null);
+  const [uploading, setUploading] = useState<Slot | null>(null);
 
   async function setFrame(frame: string | null) {
     try {
@@ -56,9 +57,13 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  /** Escolhe uma imagem e envia (crop: proporção fixa, ou false para manter a imagem inteira). */
-  async function upload(kind: 'banner' | 'bg' | 'combined', path: string, maxSize: number, crop: boolean | number, ok: string) {
-    const file = await pickImage();
+  /**
+   * Envia uma imagem (crop: proporção fixa, ou false para manter a imagem inteira). Sem `given`, abre o seletor de
+   * arquivos; com ela (veio do Pinterest), envia direto e repassa o erro para a janela não fechar.
+   */
+  async function upload(kind: Slot, given?: File) {
+    const { path, maxSize, crop, ok } = SLOTS[kind];
+    const file = given ?? (await pickImage());
     if (!file) return;
     setUploading(kind);
     try {
@@ -66,9 +71,14 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
       toast.success(ok);
     } catch (err) {
       toast.error(err);
+      if (given) {
+        setUploading(null);
+        throw err;
+      }
     }
     setUploading(null);
   }
+  const [pinFor, setPinFor] = useState<Slot | null>(null);
 
   const remove = (path: string) => void api.del<Me>(path).then(setMe, toast.error);
   const name = me.displayName || me.username;
@@ -102,7 +112,8 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
             disabledNote={combined ? 'Desligada enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
             loading={uploading === 'banner'}
             pickLabel={me.bannerUrl ? 'Trocar capa' : 'Escolher capa'}
-            onPick={() => void upload('banner', '/me/banner', 1200, 3, 'Capa atualizada')}
+            onPick={() => void upload('banner')}
+            onPinterest={() => setPinFor('banner')}
             onRemove={me.bannerUrl ? () => remove('/me/banner') : undefined}
           />
 
@@ -115,7 +126,8 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
             disabledNote={combined ? 'Desligado enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
             loading={uploading === 'bg'}
             pickLabel={me.cardBgUrl ? 'Trocar fundo' : 'Escolher fundo'}
-            onPick={() => void upload('bg', '/me/card-bg', 1200, 2 / 3, 'Fundo atualizado')}
+            onPick={() => void upload('bg')}
+            onPinterest={() => setPinFor('bg')}
             onRemove={me.cardBgUrl ? () => remove('/me/card-bg') : undefined}
           />
 
@@ -126,9 +138,10 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
             </Title>
             {combined && <CombinedPositioner />}
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant={combined ? 'secondary' : 'primary'} loading={uploading === 'combined'} onClick={() => void upload('combined', '/me/card-combined', 1600, false, 'Capa com fundo atualizada')}>
+              <Button variant={combined ? 'secondary' : 'primary'} loading={uploading === 'combined'} onClick={() => void upload('combined')}>
                 <ImagePlus size={15} /> {combined ? 'Trocar imagem' : 'Escolher imagem ou GIF'}
               </Button>
+              <PinterestButton onClick={() => setPinFor('combined')} />
               {combined && (
                 <Button variant="ghost" onClick={() => remove('/me/card-combined')}>
                   <Trash2 size={15} /> Remover
@@ -141,9 +154,31 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
         </div>
         {!embedded && <CardPreview me={me} />}
       </div>
+      {pinFor && (
+        <PinterestPicker
+          title={SLOTS[pinFor].pinTitle}
+          target={SLOTS[pinFor].target}
+          onUse={(file) => upload(pinFor, file)}
+          onClose={() => setPinFor(null)}
+        />
+      )}
     </div>
   );
 }
+
+type Slot = 'banner' | 'bg' | 'combined';
+const SLOTS: Record<Slot, { path: string; maxSize: number; crop: boolean | number; ok: string; pinTitle: string; target: string }> = {
+  banner: { path: '/me/banner', maxSize: 1200, crop: 3, ok: 'Capa atualizada', pinTitle: 'Capa do Pinterest', target: 'Capa' },
+  bg: { path: '/me/card-bg', maxSize: 1200, crop: 2 / 3, ok: 'Fundo atualizado', pinTitle: 'Fundo do Pinterest', target: 'Fundo de Mini-Perfil' },
+  combined: {
+    path: '/me/card-combined',
+    maxSize: 1600,
+    crop: false,
+    ok: 'Capa com fundo atualizada',
+    pinTitle: 'Capa com Fundo do Pinterest',
+    target: 'Capa com Fundo de Mini-Perfil',
+  },
+};
 
 /** Uma opção de imagem do perfil: miniatura, explicação e os botões de escolher e remover. */
 function ImageOption({
@@ -155,6 +190,7 @@ function ImageOption({
   loading,
   pickLabel,
   onPick,
+  onPinterest,
   onRemove,
 }: {
   title: string;
@@ -165,6 +201,7 @@ function ImageOption({
   loading: boolean;
   pickLabel: string;
   onPick: () => void;
+  onPinterest?: () => void;
   onRemove?: () => void;
 }) {
   return (
@@ -178,6 +215,7 @@ function ImageOption({
           <Button variant="secondary" className="h-9 px-4" loading={loading} onClick={onPick}>
             <ImagePlus size={15} /> {pickLabel}
           </Button>
+          {onPinterest && <PinterestButton onClick={onPinterest} />}
           {onRemove && (
             <Button variant="ghost" className="h-9 px-3" onClick={onRemove}>
               <Trash2 size={15} /> Remover

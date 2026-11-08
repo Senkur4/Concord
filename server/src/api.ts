@@ -54,6 +54,7 @@ import { playGame } from './games.ts';
 import { isAdmin, registerAdminRoutes } from './admin.ts';
 import { integrationsStatus, registerIntegrationRoutes, registerPublicIntegrationRoutes } from './integrations.ts';
 import { registerPresenceRoutes, registerPublicPresenceRoutes } from './presence.ts';
+import { registerPinterestRoutes } from './pinterest.ts';
 import {
   avatarLocked,
   mecenasBadge,
@@ -3220,6 +3221,7 @@ registerAdminRoutes(api);
 // depois do admin: as rotas /admin/contracts* ficam atrás do requireAdmin
 registerContractRoutes(api);
 registerPresenceRoutes(api);
+registerPinterestRoutes(api);
 registerIntegrationRoutes(api, {
   meUpdated: (userId) => {
     const user = get<UserRow>('SELECT * FROM users WHERE id = ?', userId);
