@@ -20,6 +20,10 @@ export interface User {
   frame?: string | null;
   /** fundo do mini perfil (imagem/GIF) */
   cardBgUrl?: string | null;
+  /** "Capa com Fundo de Mini-Perfil": uma imagem só no cartão inteiro (vale no lugar da capa e do fundo) */
+  combinedBgUrl?: string | null;
+  /** ponto da imagem combinada que fica à mostra, em % */
+  combinedPos?: { x: number; y: number };
   /** patches costurados no cartão (não vêm junto das mensagens) */
   patches?: Patch[];
   /** patch de apoiador: o acabamento que a pessoa escolheu mostrar (só o servidor grava) */

@@ -47,6 +47,7 @@ export default {
     'A conexão com a Steam também fica em Configurações → Conta e segurança, com um atalho para escolher os jogos do seu perfil.',
     'O mini-perfil (ao passar o mouse em alguém) mostra os jogos favoritos da Steam e quantos jogos a pessoa tem.',
     '"Jogando..." agora funciona também pelo navegador: baixe o detector de jogos em Configurações → Privacidade.',
+    'Nova opção "Capa com Fundo de Mini-Perfil" em Meu perfil → Visual: uma imagem só no cartão inteiro, sem emenda, e você arrasta para escolher a parte que aparece.',
   ],
   fixes: [],
 } satisfies Release;

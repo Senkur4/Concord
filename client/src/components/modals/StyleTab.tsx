@@ -1,5 +1,5 @@
-import { Check, Copy, Gift, ImagePlus, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Check, Copy, Crosshair, Gift, ImagePlus, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
 import { api } from '../../lib/api';
 import type { Me, Patch, ServerPatch, ServerSummary } from '../../lib/types';
@@ -10,6 +10,7 @@ import { PATCH_PRESETS, PATCH_TILTS, PatchBadge } from '../PatchBadge';
 import { PatchForm } from '../PatchForm';
 import { ServerPatchesPanel, equipPatch, newPatchDraft } from '../ServerPatches';
 import { Avatar, Button, cx } from '../ui';
+import { cardLook } from '../../lib/cardBg';
 
 const FRAME_NAMES: Record<string, string> = {
   neon: 'Neon',
@@ -37,11 +38,14 @@ function Title({ children, hint }: { children: React.ReactNode; hint?: string })
 }
 
 
-/** Moldura, fundo do mini perfil e patches. Dentro de Meu perfil (`embedded`) a prévia fica na coluna ao lado. */
+/**
+ * Moldura, capa, fundo do mini perfil, "capa com fundo" e patches.
+ * Dentro de Meu perfil (`embedded`) a prévia fica na coluna ao lado.
+ */
 export function StyleTab({ embedded = false }: { embedded?: boolean }) {
   const me = useApp((s) => s.me)!;
   const setMe = useApp((s) => s.setMe);
-  const [uploadingBg, setUploadingBg] = useState(false);
+  const [uploading, setUploading] = useState<'banner' | 'bg' | 'combined' | null>(null);
 
   async function setFrame(frame: string | null) {
     try {
@@ -51,23 +55,26 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  async function changeCardBg() {
+  /** Escolhe uma imagem e envia (crop: proporção fixa, ou false para manter a imagem inteira). */
+  async function upload(kind: 'banner' | 'bg' | 'combined', path: string, maxSize: number, crop: boolean | number, ok: string) {
     const file = await pickImage();
     if (!file) return;
-    setUploadingBg(true);
+    setUploading(kind);
     try {
-      setMe(await uploadImage<Me>('/me/card-bg', await prepareImage(file, 1200, 2 / 3)));
-      toast.success('Fundo do perfil atualizado');
+      setMe(await uploadImage<Me>(path, await prepareImage(file, maxSize, crop)));
+      toast.success(ok);
     } catch (err) {
       toast.error(err);
     }
-    setUploadingBg(false);
+    setUploading(null);
   }
 
+  const remove = (path: string) => void api.del<Me>(path).then(setMe, toast.error);
   const name = me.displayName || me.username;
+  const combined = !!me.combinedBgUrl;
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-8">
       {/* moldura */}
       <section>
         <Title hint="Em volta da sua foto em todo lugar.">Moldura</Title>
@@ -83,24 +90,206 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
         </div>
       </section>
 
-      {/* fundo do mini perfil + prévia */}
-      <section className={cx('grid gap-5', !embedded && 'sm:grid-cols-[minmax(0,1fr)_240px]')}>
-        <div>
-          <Title hint="Imagem ou GIF no cartão que abre quando passam o mouse em você.">Fundo do mini perfil</Title>
-          <div className="flex gap-2">
-            <Button variant="secondary" loading={uploadingBg} onClick={changeCardBg}>
-              <ImagePlus size={15} /> {me.cardBgUrl ? 'Trocar fundo' : 'Escolher imagem ou GIF'}
-            </Button>
-            {me.cardBgUrl && (
-              <Button variant="ghost" title="Remover fundo" onClick={() => void api.del<Me>('/me/card-bg').then(setMe, toast.error)}>
-                <Trash2 size={15} />
+      <div className={cx('grid gap-5', !embedded && 'sm:grid-cols-[minmax(0,1fr)_240px]')}>
+        <div className="space-y-4">
+          {/* capa */}
+          <ImageOption
+            title="Capa"
+            hint="A faixa no topo do seu mini perfil. Larga (3:1); GIF animado vale."
+            thumb={me.bannerUrl}
+            thumbClass="aspect-[3/1] w-36"
+            disabledNote={combined ? 'Desligada enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
+            loading={uploading === 'banner'}
+            pickLabel={me.bannerUrl ? 'Trocar capa' : 'Escolher capa'}
+            onPick={() => void upload('banner', '/me/banner', 1200, 3, 'Capa atualizada')}
+            onRemove={me.bannerUrl ? () => remove('/me/banner') : undefined}
+          />
+
+          {/* fundo do mini perfil */}
+          <ImageOption
+            title="Fundo de Mini-Perfil"
+            hint="Atrás das suas informações no cartão. Em pé (2:3); GIF animado vale."
+            thumb={me.cardBgUrl}
+            thumbClass="aspect-[2/3] w-16"
+            disabledNote={combined ? 'Desligado enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
+            loading={uploading === 'bg'}
+            pickLabel={me.cardBgUrl ? 'Trocar fundo' : 'Escolher fundo'}
+            onPick={() => void upload('bg', '/me/card-bg', 1200, 2 / 3, 'Fundo atualizado')}
+            onRemove={me.cardBgUrl ? () => remove('/me/card-bg') : undefined}
+          />
+
+          {/* capa com fundo: uma imagem só, sem emenda */}
+          <section className={cx('rounded-3xl p-4 ring-1', combined ? 'bg-accent/10 ring-accent/50' : 'bg-surface-0 ring-line')}>
+            <Title hint="Uma imagem só para a capa e o fundo, unidas sem emenda. Fica no lugar das duas de cima. Arraste a imagem para escolher a parte que aparece.">
+              Capa com Fundo de Mini-Perfil
+            </Title>
+            {combined && <CombinedPositioner />}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant={combined ? 'secondary' : 'primary'} loading={uploading === 'combined'} onClick={() => void upload('combined', '/me/card-combined', 1600, false, 'Capa com fundo atualizada')}>
+                <ImagePlus size={15} /> {combined ? 'Trocar imagem' : 'Escolher imagem ou GIF'}
               </Button>
-            )}
-          </div>
+              {combined && (
+                <Button variant="ghost" onClick={() => remove('/me/card-combined')}>
+                  <Trash2 size={15} /> Remover
+                </Button>
+              )}
+            </div>
+          </section>
+
           <PatchesEditor />
         </div>
         {!embedded && <CardPreview me={me} />}
-      </section>
+      </div>
+    </div>
+  );
+}
+
+/** Uma opção de imagem do perfil: miniatura, explicação e os botões de escolher e remover. */
+function ImageOption({
+  title,
+  hint,
+  thumb,
+  thumbClass,
+  disabledNote,
+  loading,
+  pickLabel,
+  onPick,
+  onRemove,
+}: {
+  title: string;
+  hint: string;
+  thumb: string | null | undefined;
+  thumbClass: string;
+  disabledNote?: string;
+  loading: boolean;
+  pickLabel: string;
+  onPick: () => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <section className={cx('flex items-center gap-4 rounded-3xl bg-surface-0 p-4 ring-1 ring-line', disabledNote && 'opacity-60')}>
+      <div className={cx('shrink-0 overflow-hidden rounded-xl bg-surface-3 ring-1 ring-line', thumbClass)}>
+        {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-fg-subtle"><ImagePlus size={18} /></div>}
+      </div>
+      <div className="min-w-0 flex-1">
+        <Title hint={disabledNote ?? hint}>{title}</Title>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className="h-9 px-4" loading={loading} onClick={onPick}>
+            <ImagePlus size={15} /> {pickLabel}
+          </Button>
+          {onRemove && (
+            <Button variant="ghost" className="h-9 px-3" onClick={onRemove}>
+              <Trash2 size={15} /> Remover
+            </Button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Ajuste de posição da capa com fundo: um cartão do tamanho do mini perfil, com a linha onde a capa termina.
+ * Arrastar move a imagem; soltar salva.
+ */
+function CombinedPositioner() {
+  const me = useApp((s) => s.me)!;
+  const setMe = useApp((s) => s.setMe);
+  const saved = me.combinedPos ?? { x: 50, y: 30 };
+  const [pos, setPos] = useState(saved);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; start: { x: number; y: number } } | null>(null);
+  const url = me.combinedBgUrl!;
+
+  useEffect(() => setPos(me.combinedPos ?? { x: 50, y: 30 }), [me.combinedPos?.x, me.combinedPos?.y, url]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = url;
+  }, [url]);
+
+  /** Quanto a imagem sobra para fora do cartão em cada eixo (em px), com "cover". */
+  function overflow() {
+    const el = box.current;
+    if (!el || !natural) return { x: 0, y: 0 };
+    const scale = Math.max(el.clientWidth / natural.w, el.clientHeight / natural.h);
+    return { x: natural.w * scale - el.clientWidth, y: natural.h * scale - el.clientHeight };
+  }
+
+  async function save(next: { x: number; y: number }) {
+    try {
+      setMe(await api.patch<Me>('/me/style', { combinedPos: next }));
+    } catch (err) {
+      toast.error(err);
+    }
+  }
+
+  const clamp = (n: number) => Math.min(100, Math.max(0, n));
+  const onDown = (e: ReactPointerEvent) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, y: e.clientY, start: pos };
+  };
+  const onMove = (e: ReactPointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const o = overflow();
+    // arrastar para a direita mostra mais da esquerda da imagem (a posição em % diminui)
+    setPos({
+      x: o.x > 0 ? clamp(d.start.x - ((e.clientX - d.x) / o.x) * 100) : 50,
+      y: o.y > 0 ? clamp(d.start.y - ((e.clientY - d.y) / o.y) * 100) : 50,
+    });
+  };
+  const onUp = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    if (pos.x !== saved.x || pos.y !== saved.y) void save(pos);
+  };
+
+  return (
+    <div className="flex flex-wrap items-end gap-4">
+      <div
+        ref={box}
+        role="slider"
+        aria-label="Arraste para escolher a parte da imagem que aparece"
+        aria-valuetext={`horizontal ${Math.round(pos.x)}%, vertical ${Math.round(pos.y)}%`}
+        tabIndex={0}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 10 : 2;
+          const keys: Record<string, [number, number]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+          const k = keys[e.key];
+          if (!k) return;
+          e.preventDefault();
+          const next = { x: clamp(pos.x + k[0]), y: clamp(pos.y + k[1]) };
+          setPos(next);
+          void save(next);
+        }}
+        className="relative h-[264px] w-48 shrink-0 cursor-grab touch-none overflow-hidden rounded-[20px] ring-1 ring-line select-none active:cursor-grabbing"
+        style={{ backgroundImage: `url("${url}")`, backgroundSize: 'cover', backgroundPosition: `${pos.x}% ${pos.y}%` }}
+      >
+        {/* onde a capa termina e onde fica a sua foto */}
+        <div className="pointer-events-none absolute inset-x-0 top-[64px] border-t-2 border-dashed border-white/70" />
+        <span className="pointer-events-none absolute top-1.5 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white">Capa</span>
+        <div className="pointer-events-none absolute top-[42px] left-[10px] h-[43px] w-[43px] rounded-full border-2 border-dashed border-white/70 bg-black/20" />
+        <span className="pointer-events-none absolute right-2 bottom-2 left-2 rounded-xl bg-black/55 px-2 py-1.5 text-center text-[11px] font-semibold text-white">
+          <Move size={12} className="mr-1 inline" /> Arraste para ajustar
+        </span>
+      </div>
+      <Button
+        variant="ghost"
+        className="h-9 px-3"
+        onClick={() => {
+          const center = { x: 50, y: 50 };
+          setPos(center);
+          void save(center);
+        }}
+      >
+        <Crosshair size={15} /> Centralizar
+      </Button>
     </div>
   );
 }
@@ -126,17 +315,17 @@ export function CardPreview({ me }: { me: Me }) {
   const name = me.displayName || me.username;
   const patches = me.patches ?? [];
   const top = me.bannerColor ?? me.avatarColor;
+  const look = cardLook(me);
   return (
     <div>
       <Title>Prévia</Title>
-      <div
-        className="overflow-hidden rounded-[22px] bg-popover bg-cover bg-center ring-1 ring-line"
-        style={me.cardBgUrl ? { backgroundImage: `linear-gradient(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.45)), url("${me.cardBgUrl}")` } : undefined}
-      >
-        {me.bannerUrl ? (
-          <img src={me.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" />
+      <div className="overflow-hidden rounded-[22px] bg-popover bg-cover bg-center ring-1 ring-line" style={look.style}>
+        {look.combined ? (
+          <div className="aspect-[3/1] w-full" />
+        ) : look.bannerUrl ? (
+          <img src={look.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" />
         ) : (
-          <div className="h-14" style={me.cardBgUrl ? undefined : { background: `linear-gradient(135deg, ${top}, ${top}55)` }} />
+          <div className="h-14" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${top}, ${top}55)` }} />
         )}
         <div className="px-3 pb-3">
           <div className="-mt-8 mb-2 flex items-end justify-between gap-1">
@@ -149,7 +338,7 @@ export function CardPreview({ me }: { me: Me }) {
               ))}
             </div>
           </div>
-          <div className={cx('rounded-2xl p-2.5', me.cardBgUrl ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
+          <div className={cx('rounded-2xl p-2.5', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
             <div className="truncate font-bold">{name}</div>
             <div className="text-xs text-fg-muted">@{me.username}</div>
             {me.bio && <p className="mt-2 line-clamp-3 text-xs">{me.bio}</p>}
@@ -211,7 +400,7 @@ function PatchesEditor() {
   }
 
   return (
-    <div className="mt-6">
+    <div className="pt-2">
       <Title hint={`Bordados que ficam costurados no seu cartão (até ${MAX_PATCHES}). Os patches criados num servidor ficam disponíveis para todo mundo de lá.`}>
         Patches
       </Title>

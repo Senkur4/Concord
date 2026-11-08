@@ -1,4 +1,4 @@
-import { BellOff, Check, Gamepad2, ImagePlus, LogOut, RotateCcw, Trash2, Volume2, Zap } from 'lucide-react';
+import { BellOff, Check, Gamepad2, ImagePlus, LogOut, RotateCcw, Sparkles, Trash2, Volume2, Zap } from 'lucide-react';
 import { connectSteam } from '../ProfilePage';
 import { notifySettings, receiveNudge } from '../../lib/nudge';
 import { clipSettings } from '../../lib/clip';
@@ -29,6 +29,24 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <span className="mb-2 block text-xs font-bold tracking-wide text-fg-muted uppercase">{children}</span>;
 }
 
+/** Título da seção Visual: grande e com cor, para ser o começo claro da parte de deixar o perfil com a sua cara. */
+function VisualHeading() {
+  return (
+    <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-accent/25 via-accent/10 to-transparent p-5 ring-1 ring-accent/30">
+      <div className="pointer-events-none absolute -top-10 -right-6 h-32 w-32 rounded-full bg-accent/25 blur-2xl" />
+      <div className="relative flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-on-accent shadow-lg shadow-accent/30">
+          <Sparkles size={22} />
+        </span>
+        <div>
+          <h2 className="font-display text-2xl leading-tight font-bold">Visual</h2>
+          <p className="text-[13px] text-fg-muted">Moldura, capa, fundo e patches: o jeito que o seu mini perfil aparece para todo mundo.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ Perfil
 
 /** Meu perfil: quem você é (foto, capa, nome, status, bio) e o visual (moldura, fundo do mini perfil, patches,
@@ -43,24 +61,10 @@ export function MyProfile() {
   const [bio, setBio] = useState(me.bio);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadingBanner, setUploadingBanner] = useState(false);
   const saveSettings = useApp((s) => s.saveSettings);
   const [customStatus, setCustomStatus] = useState(me.settings.customStatus ?? '');
   const dirty =
     name !== me.displayName || color !== me.avatarColor || banner !== me.bannerColor || bio !== me.bio || customStatus !== (me.settings.customStatus ?? '');
-
-  async function changeBanner() {
-    const file = await pickImage();
-    if (!file) return;
-    setUploadingBanner(true);
-    try {
-      setMe(await uploadImage<Me>('/me/banner', await prepareImage(file, 1200, 3)));
-      toast.success('Capa atualizada');
-    } catch (err) {
-      toast.error(err);
-    }
-    setUploadingBanner(false);
-  }
 
   async function changeAvatar() {
     const file = await pickImage();
@@ -103,17 +107,9 @@ export function MyProfile() {
               <Button variant="secondary" className="h-9 px-4" onClick={changeAvatar} loading={uploading}>
                 Trocar foto
               </Button>
-              <Button variant="secondary" className="h-9 px-4" onClick={changeBanner} loading={uploadingBanner} title="Faixa larga (3:1); GIF animado vale">
-                {me.bannerUrl ? 'Trocar capa' : 'Adicionar capa'}
-              </Button>
               {me.avatarUrl && (
                 <Button variant="ghost" className="h-9 px-3" onClick={() => void api.del<Me>('/me/avatar').then(setMe, toast.error)}>
                   Tirar foto
-                </Button>
-              )}
-              {me.bannerUrl && (
-                <Button variant="ghost" className="h-9 px-3" onClick={() => void api.del<Me>('/me/banner').then(setMe, toast.error)}>
-                  Tirar capa
                 </Button>
               )}
             </div>
@@ -156,8 +152,8 @@ export function MyProfile() {
           </div>
         </section>
 
-        <section className="space-y-5">
-          <SectionTitle>Visual</SectionTitle>
+        <section className="space-y-6">
+          <VisualHeading />
           <StyleTab embedded />
           <div className="flex items-center gap-4 border-t border-line pt-5">
             <div className="min-w-0 flex-1">

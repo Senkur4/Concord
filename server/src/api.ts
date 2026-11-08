@@ -138,6 +138,10 @@ type PublicUser = Pick<
 interface ProfileStyle {
   frame?: FrameId | null;
   cardBg?: string | null;
+  /** "Capa com Fundo de Mini-Perfil": uma imagem só no cartão inteiro (no lugar da capa e do fundo) */
+  combinedBg?: string | null;
+  /** ponto da imagem combinada que fica à mostra, em % (0 a 100) */
+  combinedPos?: { x: number; y: number };
   patches?: Patch[];
   /** página do perfil (aberta ao clicar em alguém): fundo, escurecimento, cor, colunas e vitrines */
   page?: ProfilePage;
@@ -183,8 +187,19 @@ function parseStyle(raw: string | null | undefined): ProfileStyle {
 const styleJson = (st: ProfileStyle) => ({
   frame: st.frame && (FRAMES as readonly string[]).includes(st.frame) ? st.frame : null,
   cardBgUrl: st.cardBg ?? null,
+  combinedBgUrl: st.combinedBg ?? null,
+  combinedPos: cleanPos(st.combinedPos) ?? { x: 50, y: 30 },
   patches: Array.isArray(st.patches) ? st.patches : [],
 });
+
+/** Posição da imagem combinada (em %), ou null se inválida. */
+function cleanPos(raw: unknown): { x: number; y: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { x, y } = raw as { x?: unknown; y?: unknown };
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const clamp = (n: number) => Math.round(Math.min(100, Math.max(0, n)) * 10) / 10;
+  return { x: clamp(x), y: clamp(y) };
+}
 
 const userJson = (u: PublicUser) => ({
   ...styleJson(parseStyle(u.profile_style)),
@@ -1156,6 +1171,11 @@ api.patch('/me/style', (req, res) => {
     if (frame !== null && !(FRAMES as readonly string[]).includes(frame)) fail(400, 'Moldura inválida');
     style.frame = frame;
   }
+  if (req.body?.combinedPos !== undefined) {
+    const pos = cleanPos(req.body.combinedPos);
+    if (!pos) fail(400, 'Posição inválida');
+    style.combinedPos = pos!;
+  }
   if (req.body?.patches !== undefined) {
     const next = cleanPatches(req.body.patches, me);
     dropped = (style.patches ?? []).filter((old) => old.image && !next.some((p) => p.image === old.image));
@@ -1183,6 +1203,28 @@ api.delete('/me/card-bg', (_req, res) => {
   const style = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
   removeUpload(style.cardBg);
   style.cardBg = null;
+  saveStyle(me, style);
+  res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));
+});
+
+/** "Capa com Fundo de Mini-Perfil": uma imagem que cobre o cartão inteiro (capa + fundo), sem emenda. */
+api.post('/me/card-combined', imageBody, (req, res) => {
+  const me = uid(res);
+  requireProfileUploadQuota(me);
+  const style = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
+  const old = style.combinedBg;
+  style.combinedBg = saveImage('cards', me, req.body);
+  style.combinedPos = { x: 50, y: 30 }; // imagem nova começa centralizada
+  saveStyle(me, style);
+  removeUpload(old);
+  res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));
+});
+
+api.delete('/me/card-combined', (_req, res) => {
+  const me = uid(res);
+  const style = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
+  removeUpload(style.combinedBg);
+  style.combinedBg = null;
   saveStyle(me, style);
   res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));
 });

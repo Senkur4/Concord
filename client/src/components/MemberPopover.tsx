@@ -12,6 +12,7 @@ import { Avatar, RoleDot, VerifiedBadge, cx } from './ui';
 import { PATCH_TILTS, PatchBadge } from './PatchBadge';
 import { SupporterPatch } from './SupporterPatch';
 import { usePatchInspect } from '../store/patchInspect';
+import { cardLook } from '../lib/cardBg';
 
 export function MemberPopover() {
   const { userId, serverId, x, y, close } = usePopover();
@@ -75,6 +76,7 @@ export function MemberPopover() {
   const assignable = detail.roles.filter((r) => !r.isDefault && r.position < myPos && !member.roleIds.includes(r.id));
   const topColor = member.bannerColor ?? roles.find((r) => r.color)?.color ?? member.avatarColor;
   const name = memberName(member);
+  const look = cardLook(member);
   const canNick = isMe
     ? has(perms, P.CHANGE_NICKNAME) || has(perms, P.MANAGE_NICKNAMES)
     : (has(perms, P.MANAGE_NICKNAMES) && outranks) || mecenasPower;
@@ -111,10 +113,20 @@ export function MemberPopover() {
         left: x,
         // abre na altura do clique, mas sobe o quanto precisar para caber inteiro na tela
         top: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
-        ...(member.cardBgUrl ? { backgroundImage: `linear-gradient(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.45)), url("${member.cardBgUrl}")` } : {}),
+        ...look.style,
       }}
     >
-      {member.bannerUrl ? (
+      {look.combined ? (
+        // capa com fundo: a imagem do cartão aparece aqui em cima; clicar mostra a imagem inteira
+        <button
+          aria-label="Ver a imagem do perfil em tamanho grande"
+          onClick={() => {
+            close();
+            openModal({ type: 'image', src: member.combinedBgUrl!, alt: `Capa de ${name}` });
+          }}
+          className="block aspect-[3/1] w-full"
+        />
+      ) : look.bannerUrl ? (
         <button
           aria-label="Ver capa em tamanho grande"
           onClick={() => {
@@ -123,10 +135,10 @@ export function MemberPopover() {
           }}
           className="block aspect-[3/1] w-full"
         >
-          <img src={member.bannerUrl} alt="" className="h-full w-full object-cover" />
+          <img src={look.bannerUrl} alt="" className="h-full w-full object-cover" />
         </button>
       ) : (
-        <div className="h-16" style={member.cardBgUrl ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />
+        <div className="h-16" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />
       )}
       <div className="px-4 pb-4">
         <div className="-mt-9 mb-2 flex items-end justify-between gap-2">
@@ -173,7 +185,7 @@ export function MemberPopover() {
             </div>
           )}
         </div>
-        <div className={cx('rounded-2xl p-3', member.cardBgUrl ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
+        <div className={cx('rounded-2xl p-3', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
           <div className="flex items-center gap-1.5 text-lg font-bold">
             <span className="truncate">{name}</span>
             {member.verified && <VerifiedBadge size={16} />}
