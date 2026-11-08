@@ -360,6 +360,8 @@ export interface ServerDetail {
   categories?: Category[];
   /** nomes personalizados dos grupos padrão; sem nome = Salas, Fóruns, Conversas */
   groupLabels?: Partial<Record<'voice' | 'forum' | 'text', string>>;
+  /** ordem da barra: grupos padrão e categorias misturados ("group:voice", "cat:<id>") */
+  sidebarOrder?: string[];
   members: Member[];
   voiceStates: VoiceState[];
   jams?: Jam[];

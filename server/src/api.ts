@@ -1224,7 +1224,7 @@ api.post('/servers', humansOnly, (req, res) => {
   if (owned >= MAX_OWNED_SERVERS) fail(400, `Você já é dono de ${MAX_OWNED_SERVERS} servidores. Apague algum antes de criar outro.`);
   if (!serverCreateRate(me)) fail(429, 'Você já criou servidores agora há pouco. Espere um pouco.');
   const name = str(req.body?.name, 'nome', 2, 50);
-  const server: ServerRow = { id: randomUUID(), name, owner_id: me, icon_color: pickColor(), icon_url: null, verified: 0, created_at: now(), group_labels: '{}' };
+  const server: ServerRow = { id: randomUUID(), name, owner_id: me, icon_color: pickColor(), icon_url: null, verified: 0, created_at: now(), group_labels: '{}', sidebar_order: '[]' };
 
   tx(() => {
     run('INSERT INTO servers (id, name, owner_id, icon_color, created_at) VALUES (?, ?, ?, ?, ?)', server.id, name, me, server.icon_color, server.created_at);
@@ -1334,6 +1334,7 @@ api.get('/servers/:id', (req, res) => {
     channels,
     categories,
     groupLabels: groupLabelsOf(server),
+    sidebarOrder: sidebarOrderOf(server).filter((key) => !key.startsWith('cat:') || categories.some((c) => `cat:${c.id}` === key)),
     members,
     voiceStates: voiceStatesFor(server.id),
     jams: jamsFor(server.id),
@@ -1588,6 +1589,69 @@ api.put('/servers/:id/group-labels', (req, res) => {
   res.json({ ok: true, groupLabels: labels });
 });
 
+// ---- ordem da barra lateral: grupos padrão e categorias numa lista só, como as categorias do Discord
+
+const GROUP_KEYS = GROUP_KINDS.map((k) => `group:${k}`);
+
+/** Ordem completa (todas as categorias do servidor e os três grupos), corrigindo o que estiver faltando ou sobrando. */
+function sidebarOrderOf(server: ServerRow): string[] {
+  const cats = all<CategoryRow>('SELECT * FROM categories WHERE server_id = ? ORDER BY position, name', server.id).map((c) => `cat:${c.id}`);
+  let saved: string[] = [];
+  try {
+    const parsed = JSON.parse(server.sidebar_order || '[]');
+    if (Array.isArray(parsed)) saved = parsed.filter((k): k is string => typeof k === 'string');
+  } catch {
+    // ordem estragada: volta ao padrão
+  }
+  const valid = new Set([...GROUP_KEYS, ...cats]);
+  const order = [...new Set(saved.filter((k) => valid.has(k)))];
+  // grupo que não está na ordem salva vai para o começo (padrão); categoria nova vai para o fim
+  const missingGroups = GROUP_KEYS.filter((k) => !order.includes(k));
+  return [...missingGroups, ...order, ...cats.filter((k) => !order.includes(k))];
+}
+
+/** Grupo padrão que aparece na barra (o vazio some quando há categorias; fórum vazio sempre some). */
+function groupVisible(serverId: string, kind: string, hasCategories: boolean) {
+  const n = get<{ n: number }>('SELECT COUNT(*) AS n FROM channels WHERE server_id = ? AND type = ? AND category_id IS NULL', serverId, kind)!.n;
+  return n > 0 || (kind !== 'forum' && !hasCategories);
+}
+
+/** Move um item da barra: antes de outro (beforeKey; null = no fim) ou uma posição para cima/baixo entre os visíveis. */
+function moveInSidebar(server: ServerRow, key: string, to: { beforeKey?: string | null; move?: 'up' | 'down' }) {
+  const order = sidebarOrderOf(server);
+  if (!order.includes(key)) fail(400, 'Item inválido');
+  if (to.move) {
+    const hasCategories = order.some((k) => k.startsWith('cat:'));
+    const visible = order.filter((k) => k === key || !k.startsWith('group:') || groupVisible(server.id, k.slice(6), hasCategories));
+    const i = visible.indexOf(key);
+    const j = to.move === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= visible.length) return;
+    const other = visible[j];
+    const a = order.indexOf(key);
+    const b = order.indexOf(other);
+    [order[a], order[b]] = [order[b], order[a]];
+  } else {
+    order.splice(order.indexOf(key), 1);
+    const at = to.beforeKey ? order.indexOf(to.beforeKey) : -1;
+    order.splice(at >= 0 ? at : order.length, 0, key);
+  }
+  tx(() => {
+    run('UPDATE servers SET sidebar_order = ? WHERE id = ?', JSON.stringify(order), server.id);
+    // a posição das categorias acompanha a ordem (para quem lê só as categorias, como bots)
+    order.filter((k) => k.startsWith('cat:')).forEach((k, idx) => run('UPDATE categories SET position = ? WHERE id = ?', idx, k.slice(4)));
+  });
+}
+
+api.post('/servers/:id/sidebar-order', (req, res) => {
+  const server = requireServerPerm(req.params.id, uid(res), P.MANAGE_CHANNELS);
+  const key = str(req.body?.key, 'item', 1, 80);
+  const move = req.body?.move === 'up' || req.body?.move === 'down' ? req.body.move : undefined;
+  const beforeKey = typeof req.body?.beforeKey === 'string' ? req.body.beforeKey : null;
+  moveInSidebar(server, key, move ? { move } : { beforeKey });
+  serverChanged(server.id);
+  res.json({ ok: true });
+});
+
 function requireCategoryPerm(categoryId: string, userId: string): CategoryRow {
   const cat = get<CategoryRow>('SELECT * FROM categories WHERE id = ?', categoryId);
   if (!cat) fail(404, 'Categoria não encontrada');
@@ -1611,21 +1675,13 @@ api.patch('/categories/:id', (req, res) => {
   const cat = requireCategoryPerm(req.params.id, uid(res));
   const name = optStr(req.body?.name, 'nome', 1, 50);
   if (name) run('UPDATE categories SET name = ? WHERE id = ?', name, cat.id);
-  const order = all<CategoryRow>('SELECT * FROM categories WHERE server_id = ? ORDER BY position, name', cat.server_id).map((c) => c.id);
-  let reordered = false;
+  // mudar de lugar usa a mesma ordem da barra (junto com os grupos padrão)
   if (req.body?.move === 'up' || req.body?.move === 'down') {
-    const i = order.indexOf(cat.id);
-    const j = req.body.move === 'up' ? i - 1 : i + 1;
-    if (j >= 0 && j < order.length) [order[i], order[j]] = [order[j], order[i]];
-    reordered = true;
+    moveInSidebar(getServer(cat.server_id), `cat:${cat.id}`, { move: req.body.move });
   } else if (req.body?.beforeId !== undefined) {
-    // arrastar e soltar: entra antes da categoria beforeId (null = no fim)
-    order.splice(order.indexOf(cat.id), 1);
-    const at = typeof req.body.beforeId === 'string' ? order.indexOf(req.body.beforeId) : -1;
-    order.splice(at >= 0 ? at : order.length, 0, cat.id);
-    reordered = true;
+    const beforeKey = typeof req.body.beforeId === 'string' ? `cat:${req.body.beforeId}` : null;
+    moveInSidebar(getServer(cat.server_id), `cat:${cat.id}`, { beforeKey });
   }
-  if (reordered) tx(() => order.forEach((id, idx) => run('UPDATE categories SET position = ? WHERE id = ?', idx, id)));
   serverChanged(cat.server_id);
   res.json({ ok: true });
 });

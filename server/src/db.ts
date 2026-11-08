@@ -298,6 +298,9 @@ db.exec(`
 addColumn('channels', 'category_id', 'TEXT REFERENCES categories(id) ON DELETE SET NULL');
 // nomes personalizados dos grupos padrão ({"voice": "🔊 Calls", "text": "💬 Papo"}); vazio = Salas, Fóruns, Conversas
 addColumn('servers', 'group_labels', "TEXT NOT NULL DEFAULT '{}'");
+// ordem da barra lateral, misturando grupos padrão e categorias: ["group:voice", "cat:<id>", "group:text", ...].
+// Vazio = grupos padrão primeiro, depois as categorias.
+addColumn('servers', 'sidebar_order', "TEXT NOT NULL DEFAULT '[]'");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS forum_posts (
@@ -759,6 +762,7 @@ export interface ServerRow {
   verified: number;
   created_at: number;
   group_labels: string;
+  sidebar_order: string;
 }
 
 export interface RoleRow {

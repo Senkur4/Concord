@@ -136,6 +136,35 @@ describe('nomes dos grupos padrão', () => {
   });
 });
 
+describe('ordem da barra lateral', () => {
+  it('grupos padrão mudam de lugar junto com as categorias (arrastar e setas)', async () => {
+    const { owner, serverId, detail, join } = await setup();
+    const comum = await join('comumordem');
+    const cat = (await owner.post(`/servers/${serverId}/categories`, { name: 'Jogos' })).body.id;
+    assert.deepEqual((await detail()).sidebarOrder, ['group:voice', 'group:forum', 'group:text', `cat:${cat}`]);
+
+    // arrasta Salas para o fim
+    assert.equal((await owner.post(`/servers/${serverId}/sidebar-order`, { key: 'group:voice', beforeKey: null })).status, 200);
+    assert.deepEqual((await detail()).sidebarOrder, ['group:forum', 'group:text', `cat:${cat}`, 'group:voice']);
+
+    // Conversas desce uma posição: pula para depois de Jogos
+    await owner.post(`/servers/${serverId}/sidebar-order`, { key: 'group:text', move: 'down' });
+    assert.deepEqual((await detail()).sidebarOrder, ['group:forum', `cat:${cat}`, 'group:text', 'group:voice']);
+
+    // a seta da categoria troca de lugar com o grupo vizinho; Fóruns (vazio, escondido) não conta como vizinho
+    await owner.patch(`/categories/${cat}`, { move: 'down' });
+    assert.deepEqual((await detail()).sidebarOrder, ['group:forum', 'group:text', `cat:${cat}`, 'group:voice']);
+    await owner.patch(`/categories/${cat}`, { move: 'up' });
+    await owner.patch(`/categories/${cat}`, { move: 'up' }); // já é a primeira visível: fica onde está
+    assert.deepEqual((await detail()).sidebarOrder, ['group:forum', `cat:${cat}`, 'group:text', 'group:voice']);
+
+    // quem não gerencia canais vê a mesma ordem, mas não muda
+    assert.deepEqual((await detail(comum)).sidebarOrder, ['group:forum', `cat:${cat}`, 'group:text', 'group:voice'].filter((k) => k !== `cat:${cat}`));
+    assert.equal((await comum.post(`/servers/${serverId}/sidebar-order`, { key: 'group:text', move: 'up' })).status, 403);
+    assert.equal((await owner.post(`/servers/${serverId}/sidebar-order`, { key: 'cat:nao-existe', move: 'up' })).status, 400);
+  });
+});
+
 describe('nomes de canais com emoji', () => {
   it('canal de texto mantém emojis (inclusive compostos) e sala de voz aceita tudo', async () => {
     const { owner, serverId, detail } = await setup();

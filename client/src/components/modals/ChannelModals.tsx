@@ -307,7 +307,7 @@ export function GroupSettingsModal({ serverId, kind }: { serverId: string; kind:
   }
 
   return (
-    <Modal title={<span className="flex items-center gap-2"><FolderClosed size={20} /> Renomear "{current || DEFAULT_GROUP_LABEL[kind]}"</span>} onClose={close}>
+    <Modal title={<span className="flex items-center gap-2"><FolderClosed size={20} /> {current || DEFAULT_GROUP_LABEL[kind]}</span>} onClose={close}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -327,6 +327,16 @@ export function GroupSettingsModal({ serverId, kind }: { serverId: string; kind:
             </Button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-fg-muted">Posição na barra:</span>
+          <Button type="button" variant="secondary" onClick={() => void api.post(`/servers/${serverId}/sidebar-order`, { key: `group:${kind}`, move: 'up' }).catch(toast.error)}>
+            <ArrowUp size={16} /> Subir
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void api.post(`/servers/${serverId}/sidebar-order`, { key: `group:${kind}`, move: 'down' }).catch(toast.error)}>
+            <ArrowDown size={16} /> Descer
+          </Button>
+        </div>
+        <p className="text-xs text-fg-subtle">Dica: você também pode arrastar o título do grupo na barra lateral, como as categorias.</p>
       </form>
     </Modal>
   );

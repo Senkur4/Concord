@@ -169,7 +169,8 @@ const CREATE_LABEL = { voice: 'Criar sala', forum: 'Criar fórum', text: 'Criar 
 
 // ---- arrastar e soltar (só para quem gerencia canais; no celular, use as configurações do canal/categoria)
 
-type Dragging = { kind: 'channel' | 'category'; id: string } | null;
+// seção = grupo padrão ou categoria, pela chave da ordem da barra ("group:voice", "cat:<id>")
+type Dragging = { kind: 'channel' | 'section'; id: string } | null;
 interface DragState {
   enabled: boolean;
   dragging: Dragging;
@@ -209,7 +210,7 @@ function useDropTarget(key: string, accept: (d: NonNullable<Dragging>) => boolea
   };
 }
 
-function useDragSource(kind: 'channel' | 'category', id: string) {
+function useDragSource(kind: 'channel' | 'section', id: string) {
   const ctx = useContext(DragCtx);
   if (!ctx.enabled) return { dragging: false, handlers: {} };
   return {
@@ -231,7 +232,8 @@ function useDragSource(kind: 'channel' | 'category', id: string) {
 }
 
 const moveChannel = (id: string, body: { categoryId?: string | null; beforeId?: string | null }) => void api.patch(`/channels/${id}`, body).catch(toast.error);
-const moveCategory = (id: string, beforeId: string | null) => void api.patch(`/categories/${id}`, { beforeId }).catch(toast.error);
+const moveSection = (serverId: string, key: string, beforeKey: string | null) =>
+  void api.post(`/servers/${serverId}/sidebar-order`, { key, beforeKey }).catch(toast.error);
 
 /** Linha fina indicando onde o item vai entrar (antes deste). */
 const dropLine = 'relative before:pointer-events-none before:absolute before:inset-x-2 before:-top-[3px] before:z-10 before:h-[3px] before:rounded-full before:bg-accent';
@@ -268,18 +270,31 @@ function ChannelList({ detail }: { detail: ServerDetail }) {
   const [over, setOver] = useState<string | null>(null);
   const enabled = has(detail.permissions, P.MANAGE_CHANNELS);
   const categories = [...(detail.categories ?? [])].sort(byPosition);
+  const hasCategories = categories.length > 0;
+  // ordem vinda do servidor (grupos e categorias misturados); servidor antigo: grupos primeiro, depois categorias
+  const order = detail.sidebarOrder ?? ['group:voice', 'group:forum', 'group:text', ...categories.map((c) => `cat:${c.id}`)];
   return (
     <DragCtx.Provider value={{ enabled, dragging, over, setDragging, setOver }}>
       <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-3">
-        <ChannelGroup detail={detail} kind="voice" hasCategories={categories.length > 0} />
-        <ChannelGroup detail={detail} kind="forum" hasCategories={categories.length > 0} />
-        <ChannelGroup detail={detail} kind="text" hasCategories={categories.length > 0} />
-        {categories.map((cat) => (
-          <CategorySection key={cat.id} detail={detail} category={cat} />
-        ))}
+        {order.map((key) => {
+          if (key.startsWith('group:')) {
+            const kind = key.slice(6) as 'voice' | 'forum' | 'text';
+            return <ChannelGroup key={key} detail={detail} kind={kind} hasCategories={hasCategories} />;
+          }
+          const cat = categories.find((c) => `cat:${c.id}` === key);
+          return cat ? <CategorySection key={key} detail={detail} category={cat} /> : null;
+        })}
+        <SidebarEnd serverId={detail.server.id} />
       </div>
     </DragCtx.Provider>
   );
+}
+
+/** Área no fim da lista: soltar um grupo ou categoria aqui manda para o fim. */
+function SidebarEnd({ serverId }: { serverId: string }) {
+  const target = useDropTarget('end', (d) => d.kind === 'section', (d) => moveSection(serverId, d.id, null));
+  if (!('onDrop' in target.handlers)) return null;
+  return <div {...target.handlers} className={cx('h-10', target.isOver && dropLine)} />;
 }
 
 /** Um canal na lista, que pode ser arrastado e recebe outro canal soltado em cima (entra antes dele). */
@@ -302,10 +317,12 @@ function ChannelGroup({ detail, kind, hasCategories }: { detail: ServerDetail; k
   const channels = detail.channels.filter((c) => c.type === kind && !c.categoryId).sort(byPosition);
   const openModal = useApp((s) => s.openModal);
   const canManage = has(detail.permissions, P.MANAGE_CHANNELS);
+  const key = `group:${kind}`;
+  const source = useDragSource('section', key);
   const target = useDropTarget(
-    `group:${kind}`,
-    (d) => d.kind === 'channel' && detail.channels.find((c) => c.id === d.id)?.type === kind,
-    (d) => moveChannel(d.id, { categoryId: null, beforeId: null }),
+    key,
+    (d) => (d.kind === 'section' ? d.id !== key : detail.channels.find((c) => c.id === d.id)?.type === kind),
+    (d) => (d.kind === 'section' ? moveSection(detail.server.id, d.id, key) : moveChannel(d.id, { categoryId: null, beforeId: null })),
   );
   const dragging = useContext(DragCtx).dragging;
   const draggingThisKind = dragging?.kind === 'channel' && detail.channels.find((c) => c.id === dragging.id)?.type === kind;
@@ -313,9 +330,13 @@ function ChannelGroup({ detail, kind, hasCategories }: { detail: ServerDetail; k
   // arrasta um canal desse tipo, para dar para soltar nele e tirar o canal da categoria)
   if (channels.length === 0 && (kind === 'forum' || hasCategories) && !draggingThisKind) return null;
 
+  const sectionDrag = dragging?.kind === 'section';
   return (
-    <section {...target.handlers} className={cx('rounded-2xl transition-colors', target.isOver && 'bg-accent/10 ring-1 ring-accent/50')}>
-      <div className="group mb-1.5 flex items-center gap-1 px-2">
+    <section
+      {...target.handlers}
+      className={cx('rounded-2xl transition-colors', target.isOver && (sectionDrag ? dropLine : 'bg-accent/10 ring-1 ring-accent/50'), source.dragging && 'opacity-40')}
+    >
+      <div {...source.handlers} className={cx('group mb-1.5 flex items-center gap-1 px-2', source.handlers.draggable && 'cursor-grab')}>
         <h2 className="flex-1 truncate font-sans text-xs font-bold text-fg-subtle">{detail.groupLabels?.[kind] || GROUP_LABEL[kind]}</h2>
         {canManage && (
           <>
@@ -327,7 +348,7 @@ function ChannelGroup({ detail, kind, hasCategories }: { detail: ServerDetail; k
               <Plus size={15} />
             </IconButton>
             <IconButton
-              label="Renomear grupo"
+              label="Editar grupo"
               className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
               onClick={() => openModal({ type: 'groupSettings', serverId: detail.server.id, kind })}
             >
@@ -367,11 +388,12 @@ function CategorySection({ detail, category }: { detail: ServerDetail; category:
   const texts = visible.filter((c) => c.type !== 'voice');
   const rooms = visible.filter((c) => c.type === 'voice');
 
-  const source = useDragSource('category', category.id);
+  const key = `cat:${category.id}`;
+  const source = useDragSource('section', key);
   const target = useDropTarget(
-    `cat:${category.id}`,
-    (d) => (d.kind === 'category' ? d.id !== category.id : true),
-    (d) => (d.kind === 'category' ? moveCategory(d.id, category.id) : moveChannel(d.id, { categoryId: category.id, beforeId: null })),
+    key,
+    (d) => (d.kind === 'section' ? d.id !== key : true),
+    (d) => (d.kind === 'section' ? moveSection(serverId, d.id, key) : moveChannel(d.id, { categoryId: category.id, beforeId: null })),
   );
   const draggedIsChannel = useContext(DragCtx).dragging?.kind === 'channel';
 

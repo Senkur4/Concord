@@ -43,7 +43,7 @@ export default {
   ],
   also: [
     'Nomes de canais de texto agora aceitam emoji, e os campos de nome ganharam um botão para escolher um.',
-    'Os grupos Salas, Fóruns e Conversas podem ganhar outro nome: passe o mouse no título e clique na engrenagem.',
+    'Os grupos Salas, Fóruns e Conversas podem ganhar outro nome e mudar de lugar no meio das categorias: arraste o título, ou use a engrenagem.',
   ],
   fixes: [],
 } satisfies Release;
