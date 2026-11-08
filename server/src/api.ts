@@ -1224,7 +1224,7 @@ api.post('/servers', humansOnly, (req, res) => {
   if (owned >= MAX_OWNED_SERVERS) fail(400, `Você já é dono de ${MAX_OWNED_SERVERS} servidores. Apague algum antes de criar outro.`);
   if (!serverCreateRate(me)) fail(429, 'Você já criou servidores agora há pouco. Espere um pouco.');
   const name = str(req.body?.name, 'nome', 2, 50);
-  const server: ServerRow = { id: randomUUID(), name, owner_id: me, icon_color: pickColor(), icon_url: null, verified: 0, created_at: now() };
+  const server: ServerRow = { id: randomUUID(), name, owner_id: me, icon_color: pickColor(), icon_url: null, verified: 0, created_at: now(), group_labels: '{}' };
 
   tx(() => {
     run('INSERT INTO servers (id, name, owner_id, icon_color, created_at) VALUES (?, ?, ?, ?, ?)', server.id, name, me, server.icon_color, server.created_at);
@@ -1333,6 +1333,7 @@ api.get('/servers/:id', (req, res) => {
     roles: roles.map(roleJson),
     channels,
     categories,
+    groupLabels: groupLabelsOf(server),
     members,
     voiceStates: voiceStatesFor(server.id),
     jams: jamsFor(server.id),
@@ -1559,6 +1560,33 @@ api.delete('/channels/:id', (req, res) => {
 });
 
 // ============================================================ Categorias
+
+const GROUP_KINDS = ['voice', 'forum', 'text'] as const;
+
+/** Nomes personalizados dos grupos padrão (Salas, Fóruns, Conversas) de um servidor. */
+function groupLabelsOf(server: ServerRow): Partial<Record<(typeof GROUP_KINDS)[number], string>> {
+  try {
+    const parsed = JSON.parse(server.group_labels || '{}');
+    return Object.fromEntries(GROUP_KINDS.filter((k) => typeof parsed[k] === 'string' && parsed[k]).map((k) => [k, parsed[k]]));
+  } catch {
+    return {};
+  }
+}
+
+// renomeia um grupo padrão; nome vazio (ou null) volta ao nome original
+api.put('/servers/:id/group-labels', (req, res) => {
+  const server = requireServerPerm(req.params.id, uid(res), P.MANAGE_CHANNELS);
+  const labels = groupLabelsOf(server);
+  for (const kind of GROUP_KINDS) {
+    const v = req.body?.[kind];
+    if (v === undefined) continue;
+    if (v === null || (typeof v === 'string' && !v.trim())) delete labels[kind];
+    else labels[kind] = str(v, 'nome', 1, 50);
+  }
+  run('UPDATE servers SET group_labels = ? WHERE id = ?', JSON.stringify(labels), server.id);
+  serverChanged(server.id);
+  res.json({ ok: true, groupLabels: labels });
+});
 
 function requireCategoryPerm(categoryId: string, userId: string): CategoryRow {
   const cat = get<CategoryRow>('SELECT * FROM categories WHERE id = ?', categoryId);

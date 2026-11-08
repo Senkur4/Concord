@@ -49,6 +49,7 @@ export type Modal =
   | { type: 'createChannel'; serverId: string; kind: 'text' | 'voice' | 'forum'; categoryId?: string | null }
   | { type: 'createCategory'; serverId: string }
   | { type: 'categorySettings'; serverId: string; categoryId: string }
+  | { type: 'groupSettings'; serverId: string; kind: 'voice' | 'forum' | 'text' }
   | { type: 'userSettings'; tab?: SettingsTab | 'style' }
   | { type: 'support' }
   | { type: 'shareScreen' }

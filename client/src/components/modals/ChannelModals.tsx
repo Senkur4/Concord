@@ -283,6 +283,55 @@ export function CategorySettingsModal({ serverId, categoryId }: { serverId: stri
   );
 }
 
+export const DEFAULT_GROUP_LABEL = { voice: 'Salas', forum: 'Fóruns', text: 'Conversas' } as const;
+const GROUP_HINT = { voice: 'as salas de voz', forum: 'os fóruns', text: 'os canais de texto' } as const;
+
+/** Renomear um grupo padrão (Salas, Fóruns, Conversas). */
+export function GroupSettingsModal({ serverId, kind }: { serverId: string; kind: 'voice' | 'forum' | 'text' }) {
+  const close = useApp((s) => s.closeModal);
+  const detail = useApp((s) => s.details[serverId]);
+  const current = detail?.groupLabels?.[kind] ?? '';
+  const [name, setName] = useState(current || DEFAULT_GROUP_LABEL[kind]);
+  const [saving, setSaving] = useState(false);
+
+  async function save(value: string) {
+    setSaving(true);
+    try {
+      await api.put(`/servers/${serverId}/group-labels`, { [kind]: value === DEFAULT_GROUP_LABEL[kind] ? '' : value });
+      await useApp.getState().loadDetail(serverId);
+      close();
+    } catch (err) {
+      toast.error(err);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={<span className="flex items-center gap-2"><FolderClosed size={20} /> Renomear "{current || DEFAULT_GROUP_LABEL[kind]}"</span>} onClose={close}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(name.trim());
+        }}
+        className="space-y-4"
+      >
+        <p className="text-sm text-fg-muted">Este grupo junta {GROUP_HINT[kind]} que não estão em nenhuma categoria. O nome novo aparece para todo mundo do servidor.</p>
+        <NameInput label="Nome do grupo" value={name} onValueChange={setName} placeholder={DEFAULT_GROUP_LABEL[kind]} autoFocus required maxLength={50} />
+        <div className="flex gap-2">
+          <Button type="submit" loading={saving} className="flex-1" disabled={!name.trim()}>
+            Salvar
+          </Button>
+          {current && (
+            <Button type="button" variant="secondary" onClick={() => void save('')}>
+              Voltar para "{DEFAULT_GROUP_LABEL[kind]}"
+            </Button>
+          )}
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function ChannelPermissions({ serverId, channelId }: { serverId: string; channelId: string }) {
   const detail = useApp((s) => s.details[serverId])!;
   const channel = detail.channels.find((c) => c.id === channelId)!;

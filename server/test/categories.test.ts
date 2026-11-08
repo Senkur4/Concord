@@ -123,6 +123,19 @@ describe('categorias de canais', () => {
   });
 });
 
+describe('nomes dos grupos padrão', () => {
+  it('renomeia Salas e Conversas, volta ao padrão, e só quem gerencia canais pode', async () => {
+    const { owner, serverId, detail, join } = await setup();
+    const comum = await join('comumgrupos');
+    assert.deepEqual((await detail()).groupLabels, {});
+    assert.equal((await owner.req('PUT', `/servers/${serverId}/group-labels`, { voice: '🔊 Calls', text: '💬 Papo' })).status, 200);
+    assert.deepEqual((await detail(comum)).groupLabels, { voice: '🔊 Calls', text: '💬 Papo' }, 'todo mundo vê o nome novo');
+    await owner.req('PUT', `/servers/${serverId}/group-labels`, { voice: '' });
+    assert.deepEqual((await detail()).groupLabels, { text: '💬 Papo' });
+    assert.equal((await comum.req('PUT', `/servers/${serverId}/group-labels`, { text: 'Hackeado' })).status, 403);
+  });
+});
+
 describe('nomes de canais com emoji', () => {
   it('canal de texto mantém emojis (inclusive compostos) e sala de voz aceita tudo', async () => {
     const { owner, serverId, detail } = await setup();

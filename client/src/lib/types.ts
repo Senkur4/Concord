@@ -358,6 +358,8 @@ export interface ServerDetail {
   channels: Channel[];
   /** servidores antigos (ou cache de antes da atualização) podem vir sem */
   categories?: Category[];
+  /** nomes personalizados dos grupos padrão; sem nome = Salas, Fóruns, Conversas */
+  groupLabels?: Partial<Record<'voice' | 'forum' | 'text', string>>;
   members: Member[];
   voiceStates: VoiceState[];
   jams?: Jam[];

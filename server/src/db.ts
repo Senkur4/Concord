@@ -296,6 +296,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_categories_server ON categories(server_id, position);
 `);
 addColumn('channels', 'category_id', 'TEXT REFERENCES categories(id) ON DELETE SET NULL');
+// nomes personalizados dos grupos padrão ({"voice": "🔊 Calls", "text": "💬 Papo"}); vazio = Salas, Fóruns, Conversas
+addColumn('servers', 'group_labels', "TEXT NOT NULL DEFAULT '{}'");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS forum_posts (
@@ -756,6 +758,7 @@ export interface ServerRow {
   icon_url: string | null;
   verified: number;
   created_at: number;
+  group_labels: string;
 }
 
 export interface RoleRow {

@@ -307,23 +307,38 @@ function ChannelGroup({ detail, kind, hasCategories }: { detail: ServerDetail; k
     (d) => d.kind === 'channel' && detail.channels.find((c) => c.id === d.id)?.type === kind,
     (d) => moveChannel(d.id, { categoryId: null, beforeId: null }),
   );
-  // servidor sem fóruns não mostra o grupo vazio; com categorias, grupo vazio só aparece para quem pode arrastar para ele
-  if (channels.length === 0 && (kind === 'forum' || (hasCategories && !canManage))) return null;
+  const dragging = useContext(DragCtx).dragging;
+  const draggingThisKind = dragging?.kind === 'channel' && detail.channels.find((c) => c.id === dragging.id)?.type === kind;
+  // servidor sem fóruns não mostra o grupo vazio; com categorias, o grupo vazio some (e volta enquanto alguém
+  // arrasta um canal desse tipo, para dar para soltar nele e tirar o canal da categoria)
+  if (channels.length === 0 && (kind === 'forum' || hasCategories) && !draggingThisKind) return null;
 
   return (
     <section {...target.handlers} className={cx('rounded-2xl transition-colors', target.isOver && 'bg-accent/10 ring-1 ring-accent/50')}>
-      <div className="group mb-1.5 flex items-center justify-between px-2">
-        <h2 className="font-sans text-xs font-bold text-fg-subtle">{GROUP_LABEL[kind]}</h2>
+      <div className="group mb-1.5 flex items-center gap-1 px-2">
+        <h2 className="flex-1 truncate font-sans text-xs font-bold text-fg-subtle">{detail.groupLabels?.[kind] || GROUP_LABEL[kind]}</h2>
         {canManage && (
-          <IconButton
-            label={CREATE_LABEL[kind]}
-            className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
-            onClick={() => openModal({ type: 'createChannel', serverId: detail.server.id, kind })}
-          >
-            <Plus size={15} />
-          </IconButton>
+          <>
+            <IconButton
+              label={CREATE_LABEL[kind]}
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              onClick={() => openModal({ type: 'createChannel', serverId: detail.server.id, kind })}
+            >
+              <Plus size={15} />
+            </IconButton>
+            <IconButton
+              label="Renomear grupo"
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              onClick={() => openModal({ type: 'groupSettings', serverId: detail.server.id, kind })}
+            >
+              <Settings size={13} />
+            </IconButton>
+          </>
         )}
       </div>
+      {channels.length === 0 && draggingThisKind && (
+        <div className="rounded-2xl border border-dashed border-line px-3 py-3 text-center text-xs text-fg-subtle">Solte aqui para tirar da categoria</div>
+      )}
       <div className={kind === 'voice' ? 'space-y-2' : 'space-y-0.5'}>
         {channels.map((c) => (
           <ChannelItem key={c.id} detail={detail} channel={c} />
