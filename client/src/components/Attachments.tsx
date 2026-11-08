@@ -228,6 +228,7 @@ const DAY = 86400;
 
 export function expiryLabel(seconds: number | null) {
   if (!seconds) return 'Fica para sempre';
+  if (seconds < HOUR) return `Some em ${Math.round(seconds / 60)} minutos`;
   if (seconds < DAY || seconds % DAY !== 0) {
     const h = Math.round(seconds / HOUR);
     return `Some em ${h} ${h === 1 ? 'hora' : 'horas'}`;
@@ -236,10 +237,12 @@ export function expiryLabel(seconds: number | null) {
   return `Some em ${d} ${d === 1 ? 'dia' : 'dias'}`;
 }
 
-/** Por quanto tempo a mensagem (e os arquivos) ficam: para sempre, 1 a 24 horas ou 1 a 30 dias. */
+/** Por quanto tempo a mensagem (e os arquivos) ficam: para sempre, 5 a 55 minutos, 1 a 24 horas ou 1 a 30 dias. */
 export function ExpiryPicker({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'forever' | 'hours' | 'days'>(!value ? 'forever' : value % DAY === 0 && value >= DAY ? 'days' : 'hours');
+  const [tab, setTab] = useState<'forever' | 'minutes' | 'hours' | 'days'>(
+    !value ? 'forever' : value < HOUR ? 'minutes' : value % DAY === 0 && value >= DAY ? 'days' : 'hours',
+  );
   const wrap = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -253,8 +256,15 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
     };
   }, [open]);
 
-  const nums = tab === 'hours' ? Array.from({ length: 24 }, (_, i) => i + 1) : Array.from({ length: 30 }, (_, i) => i + 1);
-  const unit = tab === 'hours' ? HOUR : DAY;
+  const nums =
+    tab === 'minutes'
+      ? Array.from({ length: 11 }, (_, i) => (i + 1) * 5)
+      : tab === 'hours'
+        ? Array.from({ length: 24 }, (_, i) => i + 1)
+        : Array.from({ length: 30 }, (_, i) => i + 1);
+  const unit = tab === 'minutes' ? 60 : tab === 'hours' ? HOUR : DAY;
+  const word = (n: number) => (tab === 'minutes' ? 'minutos' : tab === 'hours' ? (n === 1 ? 'hora' : 'horas') : n === 1 ? 'dia' : 'dias');
+  const short = tab === 'minutes' ? 'min' : tab === 'hours' ? 'h' : 'd';
 
   return (
     <div ref={wrap} className="relative inline-block">
@@ -273,10 +283,11 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
       {open && (
         <div role="dialog" aria-label="Validade da mensagem" className="absolute bottom-full left-0 z-40 mb-2 w-[300px] animate-pop-in rounded-3xl bg-popover p-3 shadow-2xl ring-1 ring-line">
           <p className="mb-2 px-1 text-xs text-fg-subtle">Quando o tempo acabar, a mensagem e os arquivos são apagados para todo mundo.</p>
-          <div role="tablist" className="mb-3 grid grid-cols-3 gap-1 rounded-2xl bg-surface-3 p-1">
+          <div role="tablist" className="mb-3 grid grid-cols-4 gap-1 rounded-2xl bg-surface-3 p-1">
             {(
               [
-                ['forever', 'Para sempre'],
+                ['forever', 'Sempre'],
+                ['minutes', 'Minutos'],
                 ['hours', 'Horas'],
                 ['days', 'Dias'],
               ] as const
@@ -304,7 +315,7 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
               <Check size={15} className="text-ok" /> A mensagem fica até alguém apagar.
             </p>
           ) : (
-            <div className="grid grid-cols-6 gap-1" aria-label={tab === 'hours' ? 'Horas' : 'Dias'}>
+            <div className={cx('grid gap-1', tab === 'minutes' ? 'grid-cols-4' : 'grid-cols-6')} aria-label={tab === 'minutes' ? 'Minutos' : tab === 'hours' ? 'Horas' : 'Dias'}>
               {nums.map((n) => {
                 const v = n * unit;
                 const on = value === v;
@@ -313,7 +324,7 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
                     key={n}
                     type="button"
                     aria-pressed={on}
-                    aria-label={`${n} ${tab === 'hours' ? (n === 1 ? 'hora' : 'horas') : n === 1 ? 'dia' : 'dias'}`}
+                    aria-label={`${n} ${word(n)}`}
                     onClick={() => {
                       onChange(v);
                       setOpen(false);
@@ -321,7 +332,7 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
                     className={cx('h-9 rounded-xl text-sm font-semibold tabular-nums transition-colors', on ? 'bg-accent text-on-accent' : 'bg-surface-3 hover:bg-surface-4')}
                   >
                     {n}
-                    <span className="text-[10px] font-medium opacity-70">{tab === 'hours' ? 'h' : 'd'}</span>
+                    <span className="text-[10px] font-medium opacity-70">{short}</span>
                   </button>
                 );
               })}
@@ -353,7 +364,76 @@ export function ExpiryBadge({ expiresAt }: { expiresAt: number | null | undefine
   );
 }
 
-/** Anexos dentro da mensagem: imagem com prévia (clique amplia), o resto como cartão para baixar. */
+const VIDEO_EXT = /\.(mp4|m4v|webm|mov|mkv)$/i;
+const AUDIO_EXT = /\.(mp3|ogg|wav|m4a|flac)$/i;
+
+/**
+ * Vídeo que toca na própria conversa. "Leve": o navegador só baixa o começo (para mostrar a primeira imagem e a
+ * duração) e depois vai buscando só o trecho que está assistindo; um vídeo de 700 MB não é baixado inteiro.
+ * Formato que o navegador não toca (alguns MKV) vira o cartão de baixar.
+ */
+function VideoAttachment({ a }: { a: Attachment }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return <FileCard a={a} />;
+  return (
+    <figure className="w-[min(480px,100%)] overflow-hidden rounded-2xl bg-black ring-1 ring-line">
+      <video
+        controls
+        preload="metadata"
+        playsInline
+        // #t=0.1: mostra a primeira imagem do vídeo no lugar de um quadro preto
+        src={`${a.url}#t=0.1`}
+        onError={() => setBroken(true)}
+        className="block max-h-[360px] w-full bg-black"
+      />
+      <figcaption className="flex items-center gap-2 bg-surface-3 px-3 py-2 text-xs">
+        <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
+        <span className="shrink-0 text-fg-subtle">{formatSize(a.size)}</span>
+        <a href={a.url} download={a.name} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
+          <Download size={15} />
+        </a>
+      </figcaption>
+    </figure>
+  );
+}
+
+function AudioAttachment({ a }: { a: Attachment }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return <FileCard a={a} />;
+  return (
+    <div className="w-80 max-w-full rounded-2xl bg-surface-3 p-3 ring-1 ring-line">
+      <div className="mb-2 flex items-center gap-2 text-xs">
+        <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
+        <span className="shrink-0 text-fg-subtle">{formatSize(a.size)}</span>
+        <a href={a.url} download={a.name} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
+          <Download size={15} />
+        </a>
+      </div>
+      <audio controls preload="metadata" src={a.url} onError={() => setBroken(true)} className="w-full" />
+    </div>
+  );
+}
+
+function FileCard({ a }: { a: Attachment }) {
+  return (
+    <a
+      href={a.url}
+      download={a.name}
+      className="flex w-72 max-w-full items-center gap-3 rounded-2xl bg-surface-3 p-3 ring-1 ring-line transition-colors hover:bg-surface-4"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+        <FileText size={20} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-bold">{a.name}</span>
+        <span className="block text-xs text-fg-muted">{formatSize(a.size)}</span>
+      </span>
+      <Download size={17} className="shrink-0 text-fg-muted" />
+    </a>
+  );
+}
+
+/** Anexos dentro da mensagem: imagem com prévia (clique amplia), vídeo e áudio tocam ali mesmo, o resto é cartão para baixar. */
 export function MessageAttachments({ items }: { items: Attachment[] | undefined }) {
   const openModal = useApp((s) => s.openModal);
   if (!items?.length) return null;
@@ -364,22 +444,12 @@ export function MessageAttachments({ items }: { items: Attachment[] | undefined 
           <button key={a.id} onClick={() => openModal({ type: 'image', src: a.url, alt: a.name })} className="block overflow-hidden rounded-2xl">
             <img src={a.url} alt={a.name} loading="lazy" className="max-h-72 max-w-full rounded-2xl object-contain" />
           </button>
+        ) : VIDEO_EXT.test(a.name) ? (
+          <VideoAttachment key={a.id} a={a} />
+        ) : AUDIO_EXT.test(a.name) ? (
+          <AudioAttachment key={a.id} a={a} />
         ) : (
-          <a
-            key={a.id}
-            href={a.url}
-            download={a.name}
-            className="flex w-72 max-w-full items-center gap-3 rounded-2xl bg-surface-3 p-3 ring-1 ring-line transition-colors hover:bg-surface-4"
-          >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-              <FileText size={20} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-bold">{a.name}</span>
-              <span className="block text-xs text-fg-muted">{formatSize(a.size)}</span>
-            </span>
-            <Download size={17} className="shrink-0 text-fg-muted" />
-          </a>
+          <FileCard key={a.id} a={a} />
         ),
       )}
     </div>

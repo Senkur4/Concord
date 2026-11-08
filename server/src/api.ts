@@ -2240,13 +2240,17 @@ api.post('/attachments', humansOnly, attachmentBody, (req, res) => {
 registerBigUploadRoutes(api, { attachmentJson, allowUpload: uploadsPerUser, humansOnly });
 
 /**
- * Validade da mensagem: de 1 a 24 horas ou de 1 a 30 dias (em segundos, como o app manda). Sem validade: null.
+ * Validade da mensagem: 5 a 55 minutos (de 5 em 5), 1 a 24 horas ou 1 a 30 dias (em segundos, como o app manda). Sem validade: null.
  * Quando acaba, a mensagem e os anexos são apagados (ver a faxina abaixo).
  */
-const EXPIRY_CHOICES = new Set([...Array.from({ length: 24 }, (_, i) => (i + 1) * 3600), ...Array.from({ length: 30 }, (_, i) => (i + 1) * 86400)]);
+const EXPIRY_CHOICES = new Set([
+  ...Array.from({ length: 11 }, (_, i) => (i + 1) * 5 * 60), // 5 a 55 minutos, de 5 em 5
+  ...Array.from({ length: 24 }, (_, i) => (i + 1) * 3600),
+  ...Array.from({ length: 30 }, (_, i) => (i + 1) * 86400),
+]);
 function expiryFrom(raw: unknown): number | null {
   if (raw === undefined || raw === null) return null;
-  if (typeof raw !== 'number' || !EXPIRY_CHOICES.has(raw)) fail(400, 'Validade inválida (de 1 a 24 horas ou de 1 a 30 dias)');
+  if (typeof raw !== 'number' || !EXPIRY_CHOICES.has(raw)) fail(400, 'Validade inválida (5 a 55 minutos, 1 a 24 horas ou 1 a 30 dias)');
   return now() + (raw as number) * 1000;
 }
 

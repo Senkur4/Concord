@@ -136,7 +136,7 @@ describe('validade', () => {
   it('aceita de 1 a 24 horas e de 1 a 30 dias, e recusa o resto', async () => {
     const me = await signUp(server, 'prazo');
     const ch = await channelOf(me);
-    for (const ok of [3600, 12 * 3600, 24 * 3600, 86400, 30 * 86400]) {
+    for (const ok of [300, 55 * 60, 3600, 12 * 3600, 24 * 3600, 30 * 86400]) {
       const r = await me.post(`/channels/${ch.id}/messages`, { content: 'oi', expiresIn: ok });
       assert.equal(r.status, 200, String(ok));
       assert.ok(Math.abs(r.body.expiresAt - (Date.now() + ok * 1000)) < 10_000);
@@ -144,7 +144,7 @@ describe('validade', () => {
     // outra pessoa (o anti-flood conta 10 mensagens a cada 10 s)
     const other = await signUp(server, 'prazo2');
     const ch2 = await channelOf(other);
-    for (const bad of [0, 60, 25 * 3600 + 1, 31 * 86400, '3600', -3600]) {
+    for (const bad of [0, 60, 7 * 60, 25 * 3600 + 1, 31 * 86400, '3600', -3600]) {
       assert.equal((await other.post(`/channels/${ch2.id}/messages`, { content: 'oi', expiresIn: bad })).status, 400, String(bad));
     }
     const plain = await other.post(`/channels/${ch2.id}/messages`, { content: 'para sempre' });
