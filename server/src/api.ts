@@ -1063,8 +1063,10 @@ api.post('/me/2fa/backup-codes', humansOnly, (req, res) => {
 
 const imageBody = express.raw({ type: () => true, limit: '9mb' });
 
-// anti-abuso: todas as trocas de imagem do perfil (avatar, banner, card, background, patch) somadas
-const profileImageUploads = limiter(10, 60 * 60_000);
+// Trocas de imagem do perfil (foto, capa, fundos, patches): sem limite por padrão. A imagem antiga é apagada ao
+// trocar, então trocar à vontade não enche o disco. Quem quiser um limite põe PROFILE_UPLOADS_PER_HOUR no .env.
+const profileUploadsPerHour = Number(process.env.PROFILE_UPLOADS_PER_HOUR) || 0;
+const profileImageUploads = profileUploadsPerHour > 0 ? limiter(profileUploadsPerHour, 60 * 60_000) : () => true;
 function requireProfileUploadQuota(me: string) {
   if (!profileImageUploads(me)) fail(429, 'Muitas trocas de imagem em pouco tempo. Espere um pouco.');
 }
