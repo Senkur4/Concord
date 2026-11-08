@@ -1191,9 +1191,15 @@ function UpdateRow() {
     ready: `Versão ${s?.version ?? ''} pronta. Reinicie para instalar.`,
     error: `Não foi possível verificar: ${s?.error ?? ''}`,
   };
+  // o servidor não publica o instalador do app (pasta downloads vazia, comum em quem hospeda em casa):
+  // não é um problema, as novidades do Concord chegam pelo servidor do mesmo jeito
+  const noFeed = s?.state === 'error' && /404|latest\.yml|Cannot find channel/i.test(s.error ?? '');
+  const message = noFeed
+    ? 'Este servidor não distribui atualizações do app desktop. Tudo bem: as novidades do Concord chegam pelo servidor; só o programa em si não se atualiza sozinho.'
+    : text[s?.state ?? 'idle'];
   return (
     <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-      <span className={cx('text-sm', s?.state === 'error' ? 'text-danger' : 'text-fg-muted')}>{text[s?.state ?? 'idle']}</span>
+      <span className={cx('text-sm', s?.state === 'error' && !noFeed ? 'text-danger' : 'text-fg-muted')}>{message}</span>
       {s?.state === 'ready' ? (
         <Button className="h-9 shrink-0 px-4 text-xs" onClick={() => void desktop!.installUpdate?.()}>
           Reiniciar agora
