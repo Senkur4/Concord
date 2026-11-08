@@ -1,4 +1,5 @@
-import { BellOff, Check, ImagePlus, LogOut, RotateCcw, Trash2, Volume2, Zap } from 'lucide-react';
+import { BellOff, Check, Gamepad2, ImagePlus, LogOut, RotateCcw, Trash2, Volume2, Zap } from 'lucide-react';
+import { connectSteam } from '../ProfilePage';
 import { notifySettings, receiveNudge } from '../../lib/nudge';
 import { clipSettings } from '../../lib/clip';
 import { NOISE_MODES, micLevels, preloadDfn, startMicTest, type GateMode, type MicLevel, type MicTestHandle } from '../../lib/voiceEffects';
@@ -1134,6 +1135,56 @@ function UpdateRow() {
   );
 }
 
+/** Conectar a conta da Steam (os jogos em destaque, as horas e os jogos em comum no perfil). */
+function SteamAccountSection() {
+  const me = useApp((s) => s.me)!;
+  const openProfile = useApp((s) => s.openProfile);
+  const [busy, setBusy] = useState(false);
+  const available = !!me.integrations?.steam;
+  return (
+    <div className="space-y-3 rounded-3xl bg-surface-0 p-4">
+      <h3 className="flex items-center gap-2 font-semibold">
+        <Gamepad2 size={18} className="text-accent" /> Steam
+      </h3>
+      {!available ? (
+        <p className="text-sm text-fg-muted">
+          A conexão com a Steam ainda não está ligada neste servidor. Quem hospeda o Concord precisa colocar a chave da API da Steam (<code>STEAM_API_KEY</code>) no arquivo <code>.env</code> e reiniciar.
+        </p>
+      ) : !me.steamLinked ? (
+        <>
+          <p className="text-sm text-fg-muted">Conecte sua conta da Steam para escolher os jogos que aparecem na sua página de perfil, mostrar suas horas e ver os jogos em comum com quem te visita.</p>
+          <Button onClick={() => void connectSteam()}>
+            <Gamepad2 size={16} /> Conectar a Steam
+          </Button>
+          <p className="text-xs text-fg-subtle">
+            Para os jogos aparecerem, deixe "Detalhes de jogos" como Público na Steam: Perfil → Editar perfil → Configurações de privacidade.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="flex items-center gap-2 text-sm text-fg-muted">
+            <Check size={16} className="text-ok" /> Sua conta da Steam está conectada.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => openProfile(me.id, null, { pickGames: true })}>Escolher jogos do perfil</Button>
+            <Button
+              variant="secondary"
+              loading={busy}
+              onClick={async () => {
+                setBusy(true);
+                await api.del('/me/steam').catch(toast.error);
+                setBusy(false);
+              }}
+            >
+              Desconectar
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Account() {
   const logout = useApp((s) => s.logout);
   const me = useApp((s) => s.me)!;
@@ -1187,6 +1238,7 @@ export function Account() {
           {noPassword ? 'Criar senha' : 'Alterar senha'}
         </Button>
       </div>
+      <SteamAccountSection />
       <div className="h-px bg-line" />
       <Button variant="danger" onClick={logout}>
         <LogOut size={16} /> Sair da conta

@@ -27,6 +27,8 @@
          ADMIN_USERS: ${ADMIN_USERS:-}
          MECENAS: ${MECENAS:-}
          STEAM_API_KEY: ${STEAM_API_KEY:-}
+         # endereço do Concord para quem está no Radmin: a Steam devolve o login para cá
+         PUBLIC_URL: http://${HOST_IP}:3000
        volumes:
          - ./data-dev:/data
        depends_on:

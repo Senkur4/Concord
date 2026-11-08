@@ -95,6 +95,11 @@ export function ProfilePage() {
   useEffect(() => setPage(data?.page ?? null), [data]);
 
   const games = steam.data?.games ?? null;
+  // veio de Configurações → Conta → "Escolher jogos do perfil": abre a escolha assim que a biblioteca chega
+  const pickOnOpen = own && !!view.pickGames;
+  useEffect(() => {
+    if (pickOnOpen && games && page) setPicking(true);
+  }, [pickOnOpen, !!games, !!page]); // eslint-disable-line react-hooks/exhaustive-deps
   const mineIds = useMemo(() => new Set(mine.data?.games?.map((g) => g.appid) ?? []), [mine.data]);
 
   if (error) {
@@ -523,19 +528,22 @@ function Common({ servers, common }: { servers: ServerSummary[]; common: SteamGa
   );
 }
 
+/** Abre o login oficial da Steam numa aba nova; quando a pessoa confirma, a conta atualiza sozinha. */
+export async function connectSteam() {
+  try {
+    const { url } = await api.post<{ url: string }>('/me/steam/link');
+    // no app desktop abre no navegador; na web, em outra aba. A biblioteca aparece sozinha quando terminar.
+    window.open(url, '_blank', 'noopener');
+    toast.info('Entre na Steam na janela que abriu. Quando terminar, sua biblioteca aparece no perfil.');
+  } catch (err) {
+    toast.error(err);
+  }
+}
+
 function SteamConnect() {
   const me = useApp((s) => s.me)!;
   if (!me.integrations?.steam) return null;
-  async function connect() {
-    try {
-      const { url } = await api.post<{ url: string }>('/me/steam/link');
-      // no app desktop abre no navegador; na web, em outra aba. A biblioteca aparece aqui sozinha quando terminar.
-      window.open(url, '_blank', 'noopener');
-      toast.info('Entre na Steam na janela que abriu. Quando terminar, sua biblioteca aparece aqui.');
-    } catch (err) {
-      toast.error(err);
-    }
-  }
+  const connect = connectSteam;
   return (
     <section className="flex flex-wrap items-center gap-5 rounded-3xl border-2 border-dashed border-line-strong p-6">
       <Gamepad2 size={28} className="text-accent" />

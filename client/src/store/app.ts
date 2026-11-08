@@ -94,12 +94,13 @@ interface AppState {
   openReleases: () => void;
   closeReleases: () => void;
   /** página do perfil de alguém aberta no lugar da conversa (mesmas regras de fechar que a de Novidades) */
-  profile: { userId: string; serverId: string | null } | null;
+  /** pickGames: abre direto a escolha de jogos em destaque (vindo de Configurações → Conta) */
+  profile: { userId: string; serverId: string | null; pickGames?: boolean } | null;
   /** página de Configurações aberta (na seção indicada), no lugar da conversa */
   settings: SettingsTab | null;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
-  openProfile: (userId: string, serverId?: string | null) => void;
+  openProfile: (userId: string, serverId?: string | null, opts?: { pickGames?: boolean }) => void;
   closeProfile: () => void;
   pendingInvite: string | null;
   /** cadastro pelo Google esperando a pessoa escolher o nome de usuário */
@@ -730,7 +731,7 @@ export const useApp = create<AppState>((set, get) => {
     releasesOpen: false,
     openReleases: () => set({ releasesOpen: true, profile: null, settings: null, mobileView: 'chat' }),
     profile: null,
-    openProfile: (userId, serverId = null) => set({ profile: { userId, serverId }, releasesOpen: false, settings: null, mobileView: 'chat' }),
+    openProfile: (userId, serverId = null, opts) => set({ profile: { userId, serverId, pickGames: opts?.pickGames }, releasesOpen: false, settings: null, mobileView: 'chat' }),
     settings: null,
     openSettings: (tab = 'profile') => set({ settings: tab, profile: null, releasesOpen: false, mobileView: 'chat' }),
     closeSettings: () => set({ settings: null, mobileView: 'sidebar' }),
