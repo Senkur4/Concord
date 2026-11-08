@@ -29,6 +29,7 @@ const FRAME_NAMES: Record<string, string> = {
   hearts: 'Corações',
   sakura: 'Sakura',
   xmas: 'Natal',
+  wreath: 'Guirlanda',
 };
 
 

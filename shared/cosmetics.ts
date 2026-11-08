@@ -15,6 +15,7 @@ export const FRAMES = [
   'hearts',
   'sakura',
   'xmas',
+  'wreath',
 ] as const;
 export type FrameId = (typeof FRAMES)[number];
 

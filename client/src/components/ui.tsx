@@ -113,7 +113,83 @@ const FRAME_PARTICLES: Record<string, string[]> = {
   xmas: ['❄', '❄', '❄', '❄', '❄'],
 };
 
+/**
+ * Guirlanda de Natal: desenhada por cima da foto (como as decorações do Discord), cobrindo só a bordinha dela.
+ * viewBox 0..100 com a foto no círculo de raio 38: o desenho sai 12 unidades para fora de cada lado.
+ */
+const WREATH_LEAVES = Array.from({ length: 44 }, (_, i) => {
+  const a = (i / 44) * Math.PI * 2;
+  const r = 39 + (i % 3 === 0 ? -2.6 : i % 3 === 1 ? 2.6 : 0);
+  return {
+    x: 50 + Math.cos(a) * r,
+    y: 50 + Math.sin(a) * r,
+    rot: (a * 180) / Math.PI + (i % 2 ? 50 : -50),
+    fill: ['#2f9a52', '#1f7440', '#45b467'][i % 3],
+  };
+});
+const WREATH_BERRIES = [20, 65, 155, 200, 245, 335].map((deg) => {
+  const a = (deg * Math.PI) / 180;
+  return { x: 50 + Math.cos(a) * 39, y: 50 + Math.sin(a) * 39 };
+});
+const WREATH_LIGHTS = Array.from({ length: 10 }, (_, i) => {
+  const a = ((i * 36 + 10) * Math.PI) / 180;
+  const r = i % 2 ? 42.5 : 35.8;
+  return { x: 50 + Math.cos(a) * r, y: 50 + Math.sin(a) * r, delay: ((i * 0.37) % 1.8).toFixed(2) };
+});
+
+function WreathFrame({ size }: { size: number }) {
+  const out = (size * 12) / 76;
+  return (
+    <svg viewBox="0 0 100 100" className="frame-wreath pointer-events-none absolute z-[1] overflow-visible" style={{ inset: -out, width: size + out * 2, height: size + out * 2 }} aria-hidden="true">
+      {/* base verde por baixo, para não aparecer buraco entre as folhas */}
+      <circle cx="50" cy="50" r="39" fill="none" stroke="#0f2f1c" strokeWidth="10.5" />
+      <circle cx="50" cy="50" r="39" fill="none" stroke="#1d6b3a" strokeWidth="8.6" />
+      {WREATH_LEAVES.map((l, i) => (
+        <path
+          key={i}
+          d="M0 -5.4 Q3.1 0 0 5.4 Q-3.1 0 0 -5.4Z"
+          transform={`translate(${l.x.toFixed(2)} ${l.y.toFixed(2)}) rotate(${l.rot.toFixed(1)})`}
+          fill={l.fill}
+          stroke="#0f2f1c"
+          strokeWidth="0.7"
+          strokeLinejoin="round"
+        />
+      ))}
+      {/* frutinhas vermelhas, em trios */}
+      {WREATH_BERRIES.map((b, i) => (
+        <g key={i} transform={`translate(${b.x.toFixed(2)} ${b.y.toFixed(2)})`} className="wreath-berry" style={{ animationDelay: `${(i * 0.5) % 2}s` }}>
+          {[
+            [-1.7, -0.8],
+            [1.7, -0.8],
+            [0, 1.6],
+          ].map(([dx, dy], k) => (
+            <g key={k}>
+              <circle cx={dx} cy={dy} r="2" fill="#e8253b" stroke="#4a0b12" strokeWidth="0.6" />
+              <circle cx={dx - 0.6} cy={dy - 0.6} r="0.55" fill="#fff" opacity="0.9" />
+            </g>
+          ))}
+        </g>
+      ))}
+      {/* luzinhas douradas piscando */}
+      {WREATH_LIGHTS.map((l, i) => (
+        <circle key={i} className="wreath-light" cx={l.x.toFixed(2)} cy={l.y.toFixed(2)} r="1.25" fill="#ffe27a" style={{ animationDelay: `${l.delay}s` }} />
+      ))}
+      {/* laço embaixo, balançando de leve */}
+      <g className="wreath-bow" transform="translate(50 88.5)">
+        <path d="M-1.5 1 L-6 10 L-3 9 L-1.6 11.5 L0 2Z" fill="#c81d32" stroke="#4a0b12" strokeWidth="0.7" strokeLinejoin="round" />
+        <path d="M1.5 1 L6 10 L3 9 L1.6 11.5 L0 2Z" fill="#c81d32" stroke="#4a0b12" strokeWidth="0.7" strokeLinejoin="round" />
+        <path d="M0 0 C-4 -6 -11 -5 -10 0 C-9.5 4.5 -4 3.5 0 0Z" fill="#e8253b" stroke="#4a0b12" strokeWidth="0.7" strokeLinejoin="round" />
+        <path d="M0 0 C4 -6 11 -5 10 0 C9.5 4.5 4 3.5 0 0Z" fill="#e8253b" stroke="#4a0b12" strokeWidth="0.7" strokeLinejoin="round" />
+        <path d="M-7.6 -1.6 C-6 -3 -4 -2.6 -2.6 -1.2" fill="none" stroke="#fff" strokeOpacity="0.7" strokeWidth="0.7" strokeLinecap="round" />
+        <path d="M7.6 -1.6 C6 -3 4 -2.6 2.6 -1.2" fill="none" stroke="#fff" strokeOpacity="0.7" strokeWidth="0.7" strokeLinecap="round" />
+        <ellipse cx="0" cy="0" rx="2.3" ry="2.6" fill="#b3172b" stroke="#4a0b12" strokeWidth="0.7" />
+      </g>
+    </svg>
+  );
+}
+
 export function AvatarFrame({ frame, size }: { frame: string; size: number }) {
+  if (frame === 'wreath') return <WreathFrame size={size} />;
   const particles = FRAME_PARTICLES[frame] ?? [];
   const fw = Math.max(2, Math.round(size * 0.065));
   return (

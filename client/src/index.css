@@ -403,6 +403,43 @@ video::-webkit-media-controls {
   font-size: calc(var(--ps) * 0.7);
   animation-delay: -0.7s;
 }
+/* Guirlanda: luzinhas piscando, frutinhas pulsando de leve e o laço balançando */
+.frame-wreath .wreath-light {
+  animation: frame-twinkle 0.9s ease-in-out infinite alternate;
+}
+.frame-wreath .wreath-berry {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wreath-berry 2s ease-in-out infinite;
+}
+.frame-wreath .wreath-bow {
+  transform-box: fill-box;
+  transform-origin: 50% 20%;
+  animation: wreath-sway 2.8s ease-in-out infinite;
+}
+@keyframes wreath-berry {
+  50% {
+    scale: 1.12;
+  }
+}
+@keyframes wreath-sway {
+  0%,
+  100% {
+    rotate: -5deg;
+  }
+  50% {
+    rotate: 5deg;
+  }
+}
+:root[data-motion='reduce'] .frame-wreath *,
+:root[data-bg-hidden='true'] .frame-wreath * {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .frame-wreath * {
+    animation: none;
+  }
+}
 @keyframes frame-spin {
   to {
     transform: rotate(360deg);
