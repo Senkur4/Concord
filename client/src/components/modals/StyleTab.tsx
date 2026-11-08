@@ -2,7 +2,7 @@ import { Check, Copy, Crosshair, Gift, ImagePlus, Move, Pencil, Plus, Trash2, X 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
 import { api } from '../../lib/api';
-import type { Me, Patch, ServerPatch, ServerSummary } from '../../lib/types';
+import type { Me, Member, Patch, Presence, ServerPatch, ServerSummary } from '../../lib/types';
 import { pickImage, prepareImage, uploadImage } from '../../lib/upload';
 import { HOME, useApp } from '../../store/app';
 import { toast } from '../../store/toast';
@@ -11,6 +11,7 @@ import { PatchForm } from '../PatchForm';
 import { ServerPatchesPanel, equipPatch, newPatchDraft } from '../ServerPatches';
 import { Avatar, Button, cx } from '../ui';
 import { cardLook } from '../../lib/cardBg';
+import { MiniProfileBody } from '../MemberPopover';
 
 const FRAME_NAMES: Record<string, string> = {
   neon: 'Neon',
@@ -310,40 +311,27 @@ function FrameOption({ label, active, onClick, children }: { label: string; acti
   );
 }
 
-/** Prévia do mini perfil como os outros veem. */
+/**
+ * Prévia do mini perfil: o mesmo cartão que os outros veem ao passar o mouse em você (MiniProfileBody), com o
+ * que está sendo editado, a sua atividade e os seus cargos no servidor aberto.
+ */
 export function CardPreview({ me }: { me: Me }) {
-  const name = me.displayName || me.username;
-  const patches = me.patches ?? [];
-  const top = me.bannerColor ?? me.avatarColor;
-  const look = cardLook(me);
+  const activeServerId = useApp((s) => s.activeServerId);
+  const details = useApp((s) => s.details);
+  const presenceNow = useApp((s) => s.online[me.id]);
+  const inActive = activeServerId ? details[activeServerId] : undefined;
+  const detail = inActive?.members.some((m) => m.id === me.id) ? inActive : Object.values(details).find((d) => d.members.some((m) => m.id === me.id));
+  const self = detail?.members.find((m) => m.id === me.id);
+  const member = { ...me, nickname: self?.nickname ?? null, joinedAt: self?.joinedAt, roleIds: self?.roleIds ?? [] } as Member;
+  const roles = detail ? detail.roles.filter((r) => member.roleIds.includes(r.id)).sort((a, b) => b.position - a.position) : [];
+  const status = me.settings.status === 'dnd' ? 'dnd' : 'online';
+  const presence: Presence = { status, activities: presenceNow?.activities ?? [], customStatus: String(me.settings.customStatus ?? '') };
+  const look = cardLook(member);
   return (
     <div>
       <Title>Prévia</Title>
-      <div className="overflow-hidden rounded-[22px] bg-popover bg-cover bg-center ring-1 ring-line" style={look.style}>
-        {look.combined ? (
-          <div className="aspect-[3/1] w-full" />
-        ) : look.bannerUrl ? (
-          <img src={look.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" />
-        ) : (
-          <div className="h-14" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${top}, ${top}55)` }} />
-        )}
-        <div className="px-3 pb-3">
-          <div className="-mt-8 mb-2 flex items-end justify-between gap-1">
-            <Avatar name={name} color={me.avatarColor} src={me.avatarUrl} frame={me.frame} size={60} status="online" className="rounded-full ring-[5px] ring-surface-1" />
-            <div className="flex flex-wrap justify-end pl-1">
-              {patches.map((p, i) => (
-                <div key={p.id} className="-ml-1.5">
-                  <PatchBadge patch={p} size={patches.length > 4 ? 28 : 34} tilt={PATCH_TILTS[i % PATCH_TILTS.length]} />
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className={cx('rounded-2xl p-2.5', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
-            <div className="truncate font-bold">{name}</div>
-            <div className="text-xs text-fg-muted">@{me.username}</div>
-            {me.bio && <p className="mt-2 line-clamp-3 text-xs">{me.bio}</p>}
-          </div>
-        </div>
+      <div className="w-80 max-w-full overflow-hidden rounded-[24px] bg-popover bg-cover bg-center shadow-2xl ring-1 ring-line" style={look.style}>
+        <MiniProfileBody member={member} serverId={detail?.server.id ?? null} ownerId={detail?.server.ownerId ?? null} roles={roles} presence={status} presenceInfo={presence} />
       </div>
     </div>
   );

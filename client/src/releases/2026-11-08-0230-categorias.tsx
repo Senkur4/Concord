@@ -49,5 +49,5 @@ export default {
     '"Jogando..." agora funciona também pelo navegador: baixe o detector de jogos em Configurações → Privacidade.',
     'Nova opção "Capa com Fundo de Mini-Perfil" em Meu perfil → Visual: uma imagem só no cartão inteiro, sem emenda, e você arrasta para escolher a parte que aparece.',
   ],
-  fixes: [],
+  fixes: ['A prévia em Meu perfil agora é igual ao mini perfil que os outros veem: mesmo tamanho, status, jogos e cargos.'],
 } satisfies Release;

@@ -1,7 +1,7 @@
 import { Ban, BadgeCheck, Bell, BellOff, Crown, Gamepad2, Gem, Headphones, MessageCircle, MessageSquarePlus, MicOff, MonitorX, Pencil, PhoneOff, Plus, Send, UserRound, UserX, Volume2, X, Zap } from 'lucide-react';
 import { sendNudge } from '../lib/nudge';
-import { memberName } from '../lib/types';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memberName, type Member, type Presence, type PresenceStatus, type Role } from '../lib/types';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { P, has } from '../../../shared/permissions.ts';
 import { api } from '../lib/api';
 import { memberPosition, useApp } from '../store/app';
@@ -17,7 +17,6 @@ import { cardLook } from '../lib/cardBg';
 export function MemberPopover() {
   const { userId, serverId, x, y, close } = usePopover();
   const ref = useRef<HTMLDivElement>(null);
-  const [addingRole, setAddingRole] = useState(false);
   // altura real do cartão (muda com capa, patches, atividade, cargos...), para ele nunca passar da tela
   const [height, setHeight] = useState(0);
   const [nudgeMsgOpen, setNudgeMsgOpen] = useState(false);
@@ -47,7 +46,6 @@ export function MemberPopover() {
 
   useEffect(() => {
     if (!userId) return;
-    setAddingRole(false);
     setNudgeMsgOpen(false);
     setNudgeMsg('');
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
@@ -74,7 +72,6 @@ export function MemberPopover() {
   const roles = detail.roles.filter((r) => member.roleIds.includes(r.id)).sort((a, b) => b.position - a.position);
   const canManageRoles = has(perms, P.MANAGE_ROLES) && (isMe || outranks);
   const assignable = detail.roles.filter((r) => !r.isDefault && r.position < myPos && !member.roleIds.includes(r.id));
-  const topColor = member.bannerColor ?? roles.find((r) => r.color)?.color ?? member.avatarColor;
   const name = memberName(member);
   const look = cardLook(member);
   const canNick = isMe
@@ -116,182 +113,21 @@ export function MemberPopover() {
         ...look.style,
       }}
     >
-      {look.combined ? (
-        // capa com fundo: a imagem do cartão aparece aqui em cima; clicar mostra a imagem inteira
-        <button
-          aria-label="Ver a imagem do perfil em tamanho grande"
-          onClick={() => {
-            close();
-            openModal({ type: 'image', src: member.combinedBgUrl!, alt: `Capa de ${name}` });
-          }}
-          className="block aspect-[3/1] w-full"
-        />
-      ) : look.bannerUrl ? (
-        <button
-          aria-label="Ver capa em tamanho grande"
-          onClick={() => {
-            close();
-            openModal({ type: 'image', src: member.bannerUrl!, alt: `Capa de ${name}` });
-          }}
-          className="block aspect-[3/1] w-full"
-        >
-          <img src={look.bannerUrl} alt="" className="h-full w-full object-cover" />
-        </button>
-      ) : (
-        <div className="h-16" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />
-      )}
-      <div className="px-4 pb-4">
-        <div className="-mt-9 mb-2 flex items-end justify-between gap-2">
-          <button
-            aria-label={member.avatarUrl ? 'Ver foto em tamanho grande' : undefined}
-            disabled={!member.avatarUrl}
-            onClick={() => {
-              close();
-              openModal({ type: 'image', src: member.avatarUrl!, alt: `Foto de ${name}` });
-            }}
-            className="rounded-full enabled:cursor-zoom-in"
-          >
-            <Avatar name={name} color={member.avatarColor} src={member.avatarUrl} frame={member.frame} size={72} status={presence ?? 'offline'} className="rounded-full ring-[6px] ring-surface-1" />
-          </button>
-          {(!!member.patches?.length || member.supporter) && (
-            <div aria-label="Patches" className="flex flex-wrap justify-end pb-0.5 pl-2">
-              {member.supporter && (
-                <button
-                  aria-label="Ver de perto o patch de apoiador do Concord"
-                  title="Apoiador do Concord: clique para ver de perto"
-                  onClick={() => {
-                    close();
-                    usePatchInspect.getState().openSupporter(member.supporter!.tier, `no perfil de ${name}`);
-                  }}
-                  className="-ml-1.5 cursor-zoom-in rounded-full"
-                >
-                  <SupporterPatch tier={member.supporter.tier} size={member.patches && member.patches.length > 3 ? 38 : 44} />
-                </button>
-              )}
-              {(member.patches ?? []).map((p, i) => (
-                <button
-                  key={p.id}
-                  aria-label={`Ver o patch ${p.text || ''} de perto`}
-                  title="Clique para ver de perto"
-                  onClick={() => {
-                    close();
-                    usePatchInspect.getState().open(p, `no perfil de ${name}`);
-                  }}
-                  className="-ml-1.5 cursor-zoom-in rounded-full"
-                >
-                  <PatchBadge patch={p} size={member.patches!.length > 3 ? 34 : 40} tilt={PATCH_TILTS[i % PATCH_TILTS.length]} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className={cx('rounded-2xl p-3', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
-          <div className="flex items-center gap-1.5 text-lg font-bold">
-            <span className="truncate">{name}</span>
-            {member.verified && <VerifiedBadge size={16} />}
-            {member.mecenas && (
-              <span title="Mecenas do Concord" className="flex shrink-0 items-center gap-1 rounded-full bg-warn/15 px-2 text-[10px] leading-5 font-extrabold tracking-wide text-warn">
-                <Gem size={11} /> MECENAS
-              </span>
-            )}
-            {member.bot && <span className="shrink-0 rounded bg-accent-2/20 px-1.5 text-[10px] leading-5 font-bold text-accent-2">BOT</span>}
-            {detail.server.ownerId === member.id && <Crown size={16} className="shrink-0 text-warn" />}
-            {canNick && (
-              <button title="Alterar apelido neste servidor" onClick={editNickname} className="ml-auto text-fg-subtle hover:text-fg">
-                <Pencil size={14} />
-              </button>
-            )}
-          </div>
-          <div className="text-sm text-fg-muted">
-            {member.nickname ? `${member.displayName} · ` : ''}@{member.username}
-          </div>
-          {member.mecenasBy && (
-            <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-warn">
-              <Gem size={12} /> Mecenas: @{member.mecenasBy}
-            </div>
-          )}
-          {presenceInfo?.customStatus && <p className="mt-2 text-sm break-words">{presenceInfo.customStatus}</p>}
-          {!!presenceInfo?.activities?.length && (
-            <div className="mt-3 space-y-2">
-              {presenceInfo.activities.map((activity, i) => (
-                <div key={i} className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-                    {activity.type === 'playing' ? <Gamepad2 size={18} /> : <Headphones size={18} />}
-                  </span>
-                  <div className="min-w-0 text-sm leading-tight">
-                    <div className="text-[11px] font-bold text-fg-subtle">{activity.type === 'playing' ? 'Jogando' : 'Ouvindo no Spotify'}</div>
-                    <div className="truncate font-semibold">{activity.type === 'playing' ? activity.name : activity.details}</div>
-                    <div className="text-xs text-fg-muted">há {elapsed(activity.since)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {member.bio && (
-            <>
-              <div className="my-3 h-px bg-line" />
-              <div className="text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Sobre mim</div>
-              <p className="mt-1 text-sm break-words whitespace-pre-wrap">{member.bio}</p>
-            </>
-          )}
-          <GameCollection
-            userId={member.id}
-            onOpen={() => {
-              close();
-              useApp.getState().openProfile(member.id, detail.server.id);
-            }}
-          />
-          <div className="my-3 h-px bg-line" />
-          <div className="text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Membro desde</div>
-          <div className="mb-3 text-sm">{new Date(member.joinedAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-
-          <div className="mb-1.5 text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Cargos</div>
-          <div className="flex flex-wrap gap-1.5">
-            {roles.map((r) => (
-              <span key={r.id} className="group flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-xs font-medium">
-                <RoleDot color={r.color} />
-                {r.name}
-                {canManageRoles && r.position < myPos && (
-                  <button
-                    title="Remover cargo"
-                    className="hidden text-fg-subtle group-hover:block hover:text-danger"
-                    onClick={() => void setRoles(member.roleIds.filter((id) => id !== r.id))}
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </span>
-            ))}
-            {roles.length === 0 && !canManageRoles && <span className="text-xs text-fg-subtle">Nenhum cargo</span>}
-            {canManageRoles && assignable.length > 0 && (
-              <div className="relative">
-                <button
-                  title="Adicionar cargo"
-                  onClick={() => setAddingRole(!addingRole)}
-                  className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-3 text-fg-muted hover:text-fg"
-                >
-                  <Plus size={14} />
-                </button>
-                {addingRole && (
-                  <div className="absolute top-7 left-0 z-10 w-48 space-y-0.5 rounded-lg border border-line bg-surface-3 p-1 shadow-xl">
-                    {assignable.map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => {
-                          setAddingRole(false);
-                          void setRoles([...member.roleIds, r.id]);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-white/10"
-                      >
-                        <RoleDot color={r.color} /> {r.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
+      <MiniProfileBody
+        member={member}
+        serverId={detail.server.id}
+        ownerId={detail.server.ownerId}
+        roles={roles}
+        presence={presence}
+        presenceInfo={presenceInfo}
+        close={close}
+        canNick={canNick}
+        editNickname={editNickname}
+        canManageRoles={canManageRoles}
+        myPos={myPos}
+        assignable={assignable}
+        setRoles={setRoles}
+      >
           {!isMe && (
             <div className="mt-3 flex flex-col gap-2">
               {nudgeMsgOpen && (
@@ -477,9 +313,243 @@ export function MemberPopover() {
               )}
             </div>
           )}
+      </MiniProfileBody>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ o cartão em si (também é a prévia de Meu perfil)
+
+type CardMember = Member & { joinedAt?: number };
+
+/**
+ * Capa, foto, patches e as informações do mini perfil. O cartão (MemberPopover) põe as ações embaixo, como
+ * children; a prévia de Meu perfil usa este mesmo componente, então mostra exatamente o que os outros veem.
+ */
+export function MiniProfileBody({
+  member,
+  serverId,
+  ownerId,
+  roles,
+  presence,
+  presenceInfo,
+  close = () => {},
+  canNick = false,
+  editNickname = () => {},
+  canManageRoles = false,
+  myPos = 0,
+  assignable = [],
+  setRoles = async () => {},
+  children,
+}: {
+  member: CardMember;
+  serverId: string | null;
+  ownerId: string | null;
+  roles: Role[];
+  presence: PresenceStatus | undefined;
+  presenceInfo: Presence | undefined;
+  close?: () => void;
+  canNick?: boolean;
+  editNickname?: () => void;
+  canManageRoles?: boolean;
+  myPos?: number;
+  assignable?: Role[];
+  setRoles?: (roleIds: string[]) => Promise<void>;
+  children?: ReactNode;
+}) {
+  const openModal = useApp((s) => s.openModal);
+  const [addingRole, setAddingRole] = useState(false);
+  useEffect(() => setAddingRole(false), [member.id]);
+  const name = memberName(member);
+  const look = cardLook(member);
+  const topColor = member.bannerColor ?? roles.find((r) => r.color)?.color ?? member.avatarColor;
+  const detail = { server: { id: serverId ?? '', ownerId } };
+  return (
+    <>
+      {look.combined ? (
+        // capa com fundo: a imagem do cartão aparece aqui em cima; clicar mostra a imagem inteira
+        <button
+          aria-label="Ver a imagem do perfil em tamanho grande"
+          onClick={() => {
+            close();
+            openModal({ type: 'image', src: member.combinedBgUrl!, alt: `Capa de ${name}` });
+          }}
+          className="block aspect-[3/1] w-full"
+        />
+      ) : look.bannerUrl ? (
+        <button
+          aria-label="Ver capa em tamanho grande"
+          onClick={() => {
+            close();
+            openModal({ type: 'image', src: member.bannerUrl!, alt: `Capa de ${name}` });
+          }}
+          className="block aspect-[3/1] w-full"
+        >
+          <img src={look.bannerUrl} alt="" className="h-full w-full object-cover" />
+        </button>
+      ) : (
+        <div className="h-16" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />
+      )}
+      <div className="px-4 pb-4">
+        <div className="-mt-9 mb-2 flex items-end justify-between gap-2">
+          <button
+            aria-label={member.avatarUrl ? 'Ver foto em tamanho grande' : undefined}
+            disabled={!member.avatarUrl}
+            onClick={() => {
+              close();
+              openModal({ type: 'image', src: member.avatarUrl!, alt: `Foto de ${name}` });
+            }}
+            className="rounded-full enabled:cursor-zoom-in"
+          >
+            <Avatar name={name} color={member.avatarColor} src={member.avatarUrl} frame={member.frame} size={72} status={presence ?? 'offline'} className="rounded-full ring-[6px] ring-surface-1" />
+          </button>
+          {(!!member.patches?.length || member.supporter) && (
+            <div aria-label="Patches" className="flex flex-wrap justify-end pb-0.5 pl-2">
+              {member.supporter && (
+                <button
+                  aria-label="Ver de perto o patch de apoiador do Concord"
+                  title="Apoiador do Concord: clique para ver de perto"
+                  onClick={() => {
+                    close();
+                    usePatchInspect.getState().openSupporter(member.supporter!.tier, `no perfil de ${name}`);
+                  }}
+                  className="-ml-1.5 cursor-zoom-in rounded-full"
+                >
+                  <SupporterPatch tier={member.supporter.tier} size={member.patches && member.patches.length > 3 ? 38 : 44} />
+                </button>
+              )}
+              {(member.patches ?? []).map((p, i) => (
+                <button
+                  key={p.id}
+                  aria-label={`Ver o patch ${p.text || ''} de perto`}
+                  title="Clique para ver de perto"
+                  onClick={() => {
+                    close();
+                    usePatchInspect.getState().open(p, `no perfil de ${name}`);
+                  }}
+                  className="-ml-1.5 cursor-zoom-in rounded-full"
+                >
+                  <PatchBadge patch={p} size={member.patches!.length > 3 ? 34 : 40} tilt={PATCH_TILTS[i % PATCH_TILTS.length]} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className={cx('rounded-2xl p-3', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
+          <div className="flex items-center gap-1.5 text-lg font-bold">
+            <span className="truncate">{name}</span>
+            {member.verified && <VerifiedBadge size={16} />}
+            {member.mecenas && (
+              <span title="Mecenas do Concord" className="flex shrink-0 items-center gap-1 rounded-full bg-warn/15 px-2 text-[10px] leading-5 font-extrabold tracking-wide text-warn">
+                <Gem size={11} /> MECENAS
+              </span>
+            )}
+            {member.bot && <span className="shrink-0 rounded bg-accent-2/20 px-1.5 text-[10px] leading-5 font-bold text-accent-2">BOT</span>}
+            {detail.server.ownerId === member.id && <Crown size={16} className="shrink-0 text-warn" />}
+            {canNick && (
+              <button title="Alterar apelido neste servidor" onClick={editNickname} className="ml-auto text-fg-subtle hover:text-fg">
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
+          <div className="text-sm text-fg-muted">
+            {member.nickname ? `${member.displayName} · ` : ''}@{member.username}
+          </div>
+          {member.mecenasBy && (
+            <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-warn">
+              <Gem size={12} /> Mecenas: @{member.mecenasBy}
+            </div>
+          )}
+          {presenceInfo?.customStatus && <p className="mt-2 text-sm break-words">{presenceInfo.customStatus}</p>}
+          {!!presenceInfo?.activities?.length && (
+            <div className="mt-3 space-y-2">
+              {presenceInfo.activities.map((activity, i) => (
+                <div key={i} className="flex items-center gap-2.5 rounded-xl bg-surface-2 p-2.5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+                    {activity.type === 'playing' ? <Gamepad2 size={18} /> : <Headphones size={18} />}
+                  </span>
+                  <div className="min-w-0 text-sm leading-tight">
+                    <div className="text-[11px] font-bold text-fg-subtle">{activity.type === 'playing' ? 'Jogando' : 'Ouvindo no Spotify'}</div>
+                    <div className="truncate font-semibold">{activity.type === 'playing' ? activity.name : activity.details}</div>
+                    <div className="text-xs text-fg-muted">há {elapsed(activity.since)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {member.bio && (
+            <>
+              <div className="my-3 h-px bg-line" />
+              <div className="text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Sobre mim</div>
+              <p className="mt-1 text-sm break-words whitespace-pre-wrap">{member.bio}</p>
+            </>
+          )}
+          <GameCollection
+            userId={member.id}
+            onOpen={() => {
+              close();
+              useApp.getState().openProfile(member.id, detail.server.id);
+            }}
+          />
+          {member.joinedAt !== undefined && (
+            <>
+          <div className="my-3 h-px bg-line" />
+          <div className="text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Membro desde</div>
+          <div className="mb-3 text-sm">{new Date(member.joinedAt).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+
+          <div className="mb-1.5 text-[11px] font-bold tracking-wider text-fg-subtle uppercase">Cargos</div>
+          <div className="flex flex-wrap gap-1.5">
+            {roles.map((r) => (
+              <span key={r.id} className="group flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-xs font-medium">
+                <RoleDot color={r.color} />
+                {r.name}
+                {canManageRoles && r.position < myPos && (
+                  <button
+                    title="Remover cargo"
+                    className="hidden text-fg-subtle group-hover:block hover:text-danger"
+                    onClick={() => void setRoles(member.roleIds.filter((id) => id !== r.id))}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </span>
+            ))}
+            {roles.length === 0 && !canManageRoles && <span className="text-xs text-fg-subtle">Nenhum cargo</span>}
+            {canManageRoles && assignable.length > 0 && (
+              <div className="relative">
+                <button
+                  title="Adicionar cargo"
+                  onClick={() => setAddingRole(!addingRole)}
+                  className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-3 text-fg-muted hover:text-fg"
+                >
+                  <Plus size={14} />
+                </button>
+                {addingRole && (
+                  <div className="absolute top-7 left-0 z-10 w-48 space-y-0.5 rounded-lg border border-line bg-surface-3 p-1 shadow-xl">
+                    {assignable.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => {
+                          setAddingRole(false);
+                          void setRoles([...member.roleIds, r.id]);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-white/10"
+                      >
+                        <RoleDot color={r.color} /> {r.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+            </>
+          )}
+      {children}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
