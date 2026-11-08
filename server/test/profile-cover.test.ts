@@ -41,3 +41,27 @@ describe('capa com fundo de mini-perfil', () => {
     assert.equal(del.body.combinedBgUrl, null);
   });
 });
+
+describe('posição da capa e do fundo do mini perfil', () => {
+  it('ajusta, valida e volta ao centro quando troca a imagem', async () => {
+    const me = await signUp(server, 'ajusta');
+    const send = (path: string) =>
+      fetch(`${server.url}/api${path}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${me.token}`, 'content-type': 'application/octet-stream' },
+        body: new Uint8Array(PNG),
+      }).then((r) => r.json());
+    for (const [path, field] of [
+      ['/me/banner', 'bannerPos'],
+      ['/me/card-bg', 'cardBgPos'],
+    ] as const) {
+      assert.deepEqual((await send(path))[field], { x: 50, y: 50 });
+      const moved = await me.patch('/me/style', { [field]: { x: 20, y: 80 } });
+      assert.equal(moved.status, 200);
+      assert.deepEqual(moved.body[field], { x: 20, y: 80 });
+      assert.equal((await me.patch('/me/style', { [field]: { x: 'esquerda', y: 1 } })).status, 400);
+      // imagem nova começa centralizada
+      assert.deepEqual((await send(path))[field], { x: 50, y: 50 });
+    }
+  });
+});

@@ -6,19 +6,22 @@ interface CardLooks {
   cardBgUrl?: string | null;
   combinedBgUrl?: string | null;
   combinedPos?: { x: number; y: number };
+  bannerPos?: { x: number; y: number };
+  cardBgPos?: { x: number; y: number };
 }
 
 /**
  * combined: uma imagem só cobre o cartão inteiro (a parte de cima faz o papel da capa), sem emenda.
  * Senão, o fundo do mini perfil (se houver) fica atrás de tudo e a capa por cima, como antes.
  */
-export function cardLook(u: CardLooks): { style: CSSProperties; combined: boolean; hasImage: boolean; bannerUrl: string | null } {
+export function cardLook(u: CardLooks): { style: CSSProperties; combined: boolean; hasImage: boolean; bannerUrl: string | null; bannerPosition: string } {
   if (u.combinedBgUrl) {
     const pos = u.combinedPos ?? { x: 50, y: 30 };
     return {
       combined: true,
       hasImage: true,
       bannerUrl: null,
+      bannerPosition: '50% 50%',
       style: {
         // a parte de cima fica limpa (é a "capa"); escurece um pouco embaixo para o texto
         backgroundImage: `linear-gradient(rgb(0 0 0 / 0) 0%, rgb(0 0 0 / 0) 20%, rgb(0 0 0 / 0.4) 100%), url("${u.combinedBgUrl}")`,
@@ -31,6 +34,13 @@ export function cardLook(u: CardLooks): { style: CSSProperties; combined: boolea
     combined: false,
     hasImage: !!u.cardBgUrl,
     bannerUrl: u.bannerUrl ?? null,
-    style: u.cardBgUrl ? { backgroundImage: `linear-gradient(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.45)), url("${u.cardBgUrl}")` } : {},
+    bannerPosition: `${u.bannerPos?.x ?? 50}% ${u.bannerPos?.y ?? 50}%`,
+    style: u.cardBgUrl
+      ? {
+          backgroundImage: `linear-gradient(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.45)), url("${u.cardBgUrl}")`,
+          backgroundSize: 'cover',
+          backgroundPosition: `${u.cardBgPos?.x ?? 50}% ${u.cardBgPos?.y ?? 50}%`,
+        }
+      : {},
   };
 }

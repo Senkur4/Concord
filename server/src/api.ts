@@ -144,6 +144,9 @@ interface ProfileStyle {
   combinedBg?: string | null;
   /** ponto da imagem combinada que fica à mostra, em % (0 a 100) */
   combinedPos?: { x: number; y: number };
+  /** ponto da capa e do fundo do mini perfil que fica à mostra, em % (a imagem vai inteira, sem cortar no envio) */
+  bannerPos?: { x: number; y: number };
+  cardBgPos?: { x: number; y: number };
   patches?: Patch[];
   /** cor do nome: 1 cor (sólida) ou 2 a 3 (degradê do começo ao fim), em #rrggbb */
   nameColors?: string[] | null;
@@ -193,6 +196,8 @@ const styleJson = (st: ProfileStyle) => ({
   cardBgUrl: st.cardBg ?? null,
   combinedBgUrl: st.combinedBg ?? null,
   combinedPos: cleanPos(st.combinedPos) ?? { x: 50, y: 30 },
+  bannerPos: cleanPos(st.bannerPos) ?? { x: 50, y: 50 },
+  cardBgPos: cleanPos(st.cardBgPos) ?? { x: 50, y: 50 },
   patches: Array.isArray(st.patches) ? st.patches : [],
   nameColors: cleanNameColors(st.nameColors),
 });
@@ -1094,6 +1099,12 @@ api.post('/me/banner', imageBody, (req, res) => {
   const old = get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.banner_url;
   const url = saveImage('banners', me, req.body);
   run('UPDATE users SET banner_url = ? WHERE id = ?', url, me);
+  // imagem nova começa centralizada
+  const st = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
+  if (st.bannerPos) {
+    delete st.bannerPos;
+    saveStyle(me, st);
+  }
   removeUpload(old);
   profileChanged(me);
   res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));
@@ -1179,17 +1190,19 @@ api.patch('/me/style', (req, res) => {
   const me = uid(res);
   const style = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
   let dropped: Patch[] = [];
+  let nameChanged = false; // algo que os outros veem mudou (cor do nome, posição da capa): avisa os servidores
   if (req.body?.frame !== undefined) {
     const frame = req.body.frame;
     if (frame !== null && !(FRAMES as readonly string[]).includes(frame)) fail(400, 'Moldura inválida');
     style.frame = frame;
   }
-  if (req.body?.combinedPos !== undefined) {
-    const pos = cleanPos(req.body.combinedPos);
+  for (const key of ['combinedPos', 'bannerPos', 'cardBgPos'] as const) {
+    if (req.body?.[key] === undefined) continue;
+    const pos = cleanPos(req.body[key]);
     if (!pos) fail(400, 'Posição inválida');
-    style.combinedPos = pos!;
+    style[key] = pos!;
+    nameChanged = true; // a capa e o fundo aparecem para os outros: avisa os servidores
   }
-  let nameChanged = false;
   if (req.body?.nameColors !== undefined) {
     const colors = req.body.nameColors === null ? null : cleanNameColors(req.body.nameColors);
     if (req.body.nameColors !== null && !colors) fail(400, 'Cor do nome inválida (use de 1 a 3 cores no formato #rrggbb)');
@@ -1214,6 +1227,7 @@ api.post('/me/card-bg', imageBody, (req, res) => {
   const style = parseStyle(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!.profile_style);
   const old = style.cardBg;
   style.cardBg = saveImage('cards', me, req.body);
+  delete style.cardBgPos; // imagem nova começa centralizada
   saveStyle(me, style);
   removeUpload(old);
   res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));

@@ -26,6 +26,9 @@ export interface User {
   combinedBgUrl?: string | null;
   /** ponto da imagem combinada que fica à mostra, em % */
   combinedPos?: { x: number; y: number };
+  /** ponto da capa e do fundo do mini perfil que fica à mostra, em % */
+  bannerPos?: { x: number; y: number };
+  cardBgPos?: { x: number; y: number };
   /** patches costurados no cartão (não vêm junto das mensagens) */
   patches?: Patch[];
   /** patch de apoiador: o acabamento que a pessoa escolheu mostrar (só o servidor grava) */

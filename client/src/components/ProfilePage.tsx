@@ -289,7 +289,14 @@ function Hero({
   return (
     <header className="relative h-[460px] overflow-hidden md:h-[520px]">
       {cover ? (
-        <img src={cover} alt="" onError={() => setHeroBroken(true)} className="absolute inset-0 h-full w-full object-cover" />
+        <img
+          src={cover}
+          alt=""
+          onError={() => setHeroBroken(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+          // a capa do mini perfil, quando é ela que aparece aqui, usa o mesmo ajuste de posição
+          style={cover === user.bannerUrl && user.bannerPos ? { objectPosition: `${user.bannerPos.x}% ${user.bannerPos.y}%` } : undefined}
+        />
       ) : (
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 70% 15%, ${tint}88, transparent 65%)` }} />
       )}

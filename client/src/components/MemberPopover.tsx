@@ -386,7 +386,7 @@ export function MiniProfileBody({
           }}
           className="block aspect-[3/1] w-full"
         >
-          <img src={look.bannerUrl} alt="" className="h-full w-full object-cover" />
+          <img src={look.bannerUrl} alt="" className="h-full w-full object-cover" style={{ objectPosition: look.bannerPosition }} />
         </button>
       ) : (
         <div className="h-16" style={look.hasImage ? undefined : { background: `linear-gradient(135deg, ${topColor}, ${topColor}55)` }} />

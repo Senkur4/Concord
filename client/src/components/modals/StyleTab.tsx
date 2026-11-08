@@ -1,5 +1,5 @@
 import { Check, Copy, Crosshair, Gift, ImagePlus, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
 import { api } from '../../lib/api';
 import type { Me, Member, Patch, Presence, ServerPatch, ServerSummary } from '../../lib/types';
@@ -106,7 +106,7 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
           {/* capa */}
           <ImageOption
             title="Capa"
-            hint="A faixa no topo do seu mini perfil. Larga (3:1); GIF animado vale."
+            hint="A faixa no topo do seu mini perfil. Larga (3:1); GIF animado vale. Depois de escolher, arraste para ajustar."
             thumb={me.bannerUrl}
             thumbClass="aspect-[3/1] w-36"
             disabledNote={combined ? 'Desligada enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
@@ -115,12 +115,23 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
             onPick={() => void upload('banner')}
             onPinterest={() => setPinFor('banner')}
             onRemove={me.bannerUrl ? () => remove('/me/banner') : undefined}
+            positioner={
+              me.bannerUrl ? (
+                <ImagePositioner
+                  url={me.bannerUrl}
+                  field="bannerPos"
+                  fallback={{ x: 50, y: 50 }}
+                  boxClass="aspect-[3/1] w-72 max-w-full rounded-2xl"
+                  overlay={<div className="pointer-events-none absolute bottom-[-22px] left-[14px] h-[52px] w-[52px] rounded-full border-2 border-dashed border-white/70 bg-black/20" />}
+                />
+              ) : undefined
+            }
           />
 
           {/* fundo do mini perfil */}
           <ImageOption
             title="Fundo de Mini-Perfil"
-            hint="Atrás das suas informações no cartão. Em pé (2:3); GIF animado vale."
+            hint="Atrás das suas informações no cartão. Em pé (2:3); GIF animado vale. Depois de escolher, arraste para ajustar."
             thumb={me.cardBgUrl}
             thumbClass="aspect-[2/3] w-16"
             disabledNote={combined ? 'Desligado enquanto a Capa com Fundo de Mini-Perfil estiver em uso.' : undefined}
@@ -129,6 +140,25 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
             onPick={() => void upload('bg')}
             onPinterest={() => setPinFor('bg')}
             onRemove={me.cardBgUrl ? () => remove('/me/card-bg') : undefined}
+            positioner={
+              me.cardBgUrl ? (
+                <ImagePositioner
+                  url={me.cardBgUrl}
+                  field="cardBgPos"
+                  fallback={{ x: 50, y: 50 }}
+                  boxClass="h-[264px] w-48 rounded-[20px]"
+                  overlay={
+                    <>
+                      {/* a capa fica por cima do fundo, no topo do cartão */}
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-[64px] border-b-2 border-dashed border-white/70 bg-black/35" />
+                      <span className="pointer-events-none absolute top-1.5 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white">
+                        {me.bannerUrl ? 'Sua capa fica aqui' : 'Topo'}
+                      </span>
+                    </>
+                  }
+                />
+              ) : undefined
+            }
           />
 
           {/* capa com fundo: uma imagem só, sem emenda */}
@@ -168,8 +198,9 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
 
 type Slot = 'banner' | 'bg' | 'combined';
 const SLOTS: Record<Slot, { path: string; maxSize: number; crop: boolean | number; ok: string; pinTitle: string; target: string }> = {
-  banner: { path: '/me/banner', maxSize: 1200, crop: 3, ok: 'Capa atualizada', pinTitle: 'Capa do Pinterest', target: 'Capa' },
-  bg: { path: '/me/card-bg', maxSize: 1200, crop: 2 / 3, ok: 'Fundo atualizado', pinTitle: 'Fundo do Pinterest', target: 'Fundo de Mini-Perfil' },
+  // a imagem vai inteira (sem cortar no envio): a parte que aparece é escolhida arrastando, depois
+  banner: { path: '/me/banner', maxSize: 1600, crop: false, ok: 'Capa atualizada', pinTitle: 'Capa do Pinterest', target: 'Capa' },
+  bg: { path: '/me/card-bg', maxSize: 1600, crop: false, ok: 'Fundo atualizado', pinTitle: 'Fundo do Pinterest', target: 'Fundo de Mini-Perfil' },
   combined: {
     path: '/me/card-combined',
     maxSize: 1600,
@@ -192,7 +223,9 @@ function ImageOption({
   onPick,
   onPinterest,
   onRemove,
+  positioner,
 }: {
+  positioner?: ReactNode;
   title: string;
   hint: string;
   thumb: string | null | undefined;
@@ -205,7 +238,8 @@ function ImageOption({
   onRemove?: () => void;
 }) {
   return (
-    <section className={cx('flex items-center gap-4 rounded-3xl bg-surface-0 p-4 ring-1 ring-line', disabledNote && 'opacity-60')}>
+    <section className={cx('rounded-3xl bg-surface-0 p-4 ring-1 ring-line', disabledNote && 'opacity-60')}>
+      <div className="flex items-center gap-4">
       <div className={cx('shrink-0 overflow-hidden rounded-xl bg-surface-3 ring-1 ring-line', thumbClass)}>
         {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-fg-subtle"><ImagePlus size={18} /></div>}
       </div>
@@ -223,32 +257,35 @@ function ImageOption({
           )}
         </div>
       </div>
+      </div>
+      {positioner && !disabledNote && <div className="mt-3">{positioner}</div>}
     </section>
   );
 }
 
+type PosField = 'combinedPos' | 'bannerPos' | 'cardBgPos';
+
 /**
- * Ajuste de posição da capa com fundo: um cartão do tamanho do mini perfil, com a linha onde a capa termina.
- * Arrastar move a imagem; soltar salva.
+ * Ajuste de posição de uma imagem (capa com fundo, capa ou fundo do mini perfil): uma caixa no formato de onde a
+ * imagem aparece, com as marcas do cartão. Arrastar move a imagem; soltar salva. Setas do teclado também movem.
  */
-function CombinedPositioner() {
+function ImagePositioner({ url, field, fallback, boxClass, overlay }: { url: string; field: PosField; fallback: { x: number; y: number }; boxClass: string; overlay?: ReactNode }) {
   const me = useApp((s) => s.me)!;
   const setMe = useApp((s) => s.setMe);
-  const saved = me.combinedPos ?? { x: 50, y: 30 };
+  const saved = me[field] ?? fallback;
   const [pos, setPos] = useState(saved);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; start: { x: number; y: number } } | null>(null);
-  const url = me.combinedBgUrl!;
 
-  useEffect(() => setPos(me.combinedPos ?? { x: 50, y: 30 }), [me.combinedPos?.x, me.combinedPos?.y, url]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setPos(me[field] ?? fallback), [me[field]?.x, me[field]?.y, url]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const img = new Image();
     img.onload = () => setNatural({ w: img.naturalWidth, h: img.naturalHeight });
     img.src = url;
   }, [url]);
 
-  /** Quanto a imagem sobra para fora do cartão em cada eixo (em px), com "cover". */
+  /** Quanto a imagem sobra para fora da caixa em cada eixo (em px), com "cover". */
   function overflow() {
     const el = box.current;
     if (!el || !natural) return { x: 0, y: 0 };
@@ -258,7 +295,7 @@ function CombinedPositioner() {
 
   async function save(next: { x: number; y: number }) {
     try {
-      setMe(await api.patch<Me>('/me/style', { combinedPos: next }));
+      setMe(await api.patch<Me>('/me/style', { [field]: next }));
     } catch (err) {
       toast.error(err);
     }
@@ -284,9 +321,11 @@ function CombinedPositioner() {
     drag.current = null;
     if (pos.x !== saved.x || pos.y !== saved.y) void save(pos);
   };
+  const o = natural && box.current ? overflow() : null;
+  const fits = o && o.x < 1 && o.y < 1; // a imagem já tem o formato exato: não há o que ajustar
 
   return (
-    <div className="flex flex-wrap items-end gap-4">
+    <div className="flex flex-wrap items-end gap-3">
       <div
         ref={box}
         role="slider"
@@ -307,15 +346,12 @@ function CombinedPositioner() {
           setPos(next);
           void save(next);
         }}
-        className="relative h-[264px] w-48 shrink-0 cursor-grab touch-none overflow-hidden rounded-[20px] ring-1 ring-line select-none active:cursor-grabbing"
+        className={cx('relative shrink-0 cursor-grab touch-none overflow-hidden ring-1 ring-line select-none active:cursor-grabbing', boxClass)}
         style={{ backgroundImage: `url("${url}")`, backgroundSize: 'cover', backgroundPosition: `${pos.x}% ${pos.y}%` }}
       >
-        {/* onde a capa termina e onde fica a sua foto */}
-        <div className="pointer-events-none absolute inset-x-0 top-[64px] border-t-2 border-dashed border-white/70" />
-        <span className="pointer-events-none absolute top-1.5 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white">Capa</span>
-        <div className="pointer-events-none absolute top-[42px] left-[10px] h-[43px] w-[43px] rounded-full border-2 border-dashed border-white/70 bg-black/20" />
-        <span className="pointer-events-none absolute right-2 bottom-2 left-2 rounded-xl bg-black/55 px-2 py-1.5 text-center text-[11px] font-semibold text-white">
-          <Move size={12} className="mr-1 inline" /> Arraste para ajustar
+        {overlay}
+        <span className="pointer-events-none absolute right-2 bottom-2 left-2 rounded-xl bg-black/55 px-2 py-1 text-center text-[11px] font-semibold text-white">
+          <Move size={12} className="mr-1 inline" /> {fits ? 'A imagem já cabe inteira' : 'Arraste para ajustar'}
         </span>
       </div>
       <Button
@@ -330,6 +366,26 @@ function CombinedPositioner() {
         <Crosshair size={15} /> Centralizar
       </Button>
     </div>
+  );
+}
+
+function CombinedPositioner() {
+  const me = useApp((s) => s.me)!;
+  return (
+    <ImagePositioner
+      url={me.combinedBgUrl!}
+      field="combinedPos"
+      fallback={{ x: 50, y: 30 }}
+      boxClass="h-[264px] w-48 rounded-[20px]"
+      overlay={
+        <>
+          {/* onde a capa termina e onde fica a sua foto */}
+          <div className="pointer-events-none absolute inset-x-0 top-[64px] border-t-2 border-dashed border-white/70" />
+          <span className="pointer-events-none absolute top-1.5 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white">Capa</span>
+          <div className="pointer-events-none absolute top-[42px] left-[10px] h-[43px] w-[43px] rounded-full border-2 border-dashed border-white/70 bg-black/20" />
+        </>
+      }
+    />
   );
 }
 
