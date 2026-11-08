@@ -1,0 +1,14 @@
+{
+  "name": "concord-musicbot",
+  "private": true,
+  "type": "module",
+  "description": "Bot de música (YouTube) para o Concord",
+  "scripts": {
+    "start": "node bot.mjs"
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "1.2.1",
+    "livekit-server-sdk": "2.19.2",
+    "socket.io-client": "4.8.4"
+  }
+}
