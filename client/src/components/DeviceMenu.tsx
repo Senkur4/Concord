@@ -35,12 +35,15 @@ export function DeviceSplitButton({
   danger,
   onClick,
   children,
+  compact = false,
 }: {
   kind: Kind;
   label: string;
   danger?: boolean;
   onClick: () => void;
   children: ReactNode;
+  /** mais estreito (painel de baixo, para sobrar espaço para o nome) */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
@@ -68,7 +71,7 @@ export function DeviceSplitButton({
         title={label}
         aria-label={label}
         onClick={onClick}
-        className={cx('flex h-9 w-8 items-center justify-center rounded-l-full transition-colors', danger ? 'text-danger' : 'text-fg-muted hover:text-fg')}
+        className={cx('flex h-9 items-center justify-center rounded-l-full transition-colors', compact ? 'w-7' : 'w-8', danger ? 'text-danger' : 'text-fg-muted hover:text-fg')}
       >
         {children}
       </button>
@@ -80,7 +83,7 @@ export function DeviceSplitButton({
           setAnchor(ref.current?.getBoundingClientRect() ?? null);
           setOpen(!open);
         }}
-        className="flex h-9 w-4 items-center justify-center rounded-r-full text-fg-subtle hover:text-fg"
+        className={cx('flex h-9 items-center justify-center rounded-r-full text-fg-subtle hover:text-fg', compact ? 'w-3.5' : 'w-4')}
       >
         <ChevronUp size={13} className={cx('transition-transform', !open && 'rotate-180')} />
       </button>

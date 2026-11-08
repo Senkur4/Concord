@@ -4,7 +4,6 @@ import {
   Hash,
   HeadphoneOff,
   Headphones,
-  HelpCircle,
   Lock,
   LogOut,
   MessagesSquare,
@@ -673,7 +672,7 @@ function UserCard() {
   );
 
   return (
-    <div ref={menuRef} className="relative mx-3 mb-3 flex items-center gap-1 rounded-[20px] bg-surface-3 p-2.5">
+    <div ref={menuRef} className="relative mx-3 mb-3 flex items-center gap-0.5 rounded-[20px] bg-surface-3 p-2 pr-1.5">
       {menu && (
         <div className="absolute right-0 bottom-full left-0 z-30 mb-2 animate-pop-in space-y-0.5 rounded-3xl bg-popover p-2 shadow-2xl ring-1 ring-line">
           {option('online', 'Online', 'Recebe chamadas de atenção e avisos')}
@@ -711,17 +710,24 @@ function UserCard() {
         title="Ver meu perfil"
         aria-label="Ver meu perfil"
       >
-        <Avatar name={me.displayName} color={me.avatarColor} src={me.avatarUrl} frame={me.frame} size={40} status={presence} />
+        <Avatar name={me.displayName} color={me.avatarColor} src={me.avatarUrl} frame={me.frame} size={36} status={presence} />
       </button>
-      <button onClick={() => setMenu(!menu)} className="flex min-w-0 flex-1 items-center gap-2.5 pl-1.5 text-left" title="Status e perfil" aria-expanded={menu}>
+      <button
+        onClick={() => setMenu(!menu)}
+        className="flex min-w-0 flex-1 items-center rounded-xl py-1 pr-1 pl-1.5 text-left hover:bg-surface-4/60"
+        title={`${me.displayName} (@${me.username}) · status e perfil`}
+        aria-expanded={menu}
+      >
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-sm font-bold">{me.displayName}</div>
+          {/* nome comprido diminui um pouco antes de precisar cortar */}
+          <div className={cx('truncate font-bold', me.displayName.length > 11 ? 'text-[13px]' : 'text-sm')}>{me.displayName}</div>
           <div className={cx('truncate text-xs', presence === 'dnd' ? 'text-danger' : 'text-fg-muted')}>
-            {presence === 'dnd' ? 'Não perturbe' : me.bio || `@${me.username}`}
+            {presence === 'dnd' ? 'Não perturbe' : `@${me.username}`}
           </div>
         </div>
       </button>
       <DeviceSplitButton
+        compact
         kind="audioinput"
         label={serverMuted ? 'Silenciado por um moderador' : micOn ? 'Silenciar' : 'Ativar microfone'}
         danger={micOff}
@@ -729,13 +735,10 @@ function UserCard() {
       >
         {micOff ? <MicOff size={18} /> : <Mic size={18} />}
       </DeviceSplitButton>
-      <DeviceSplitButton kind="audiooutput" label={deafened ? 'Ativar áudio' : 'Ensurdecer'} danger={deafened} onClick={() => void toggleDeafen()}>
+      <DeviceSplitButton compact kind="audiooutput" label={deafened ? 'Ativar áudio' : 'Ensurdecer'} danger={deafened} onClick={() => void toggleDeafen()}>
         {deafened ? <HeadphoneOff size={18} /> : <Headphones size={18} />}
       </DeviceSplitButton>
-      <IconButton label="Como o Concord funciona" className="h-9 w-8 shrink-0" onClick={() => openModal({ type: 'onboarding' })}>
-        <HelpCircle size={18} />
-      </IconButton>
-      <IconButton label="Configurações" className="h-9 w-8 shrink-0" onClick={() => openModal({ type: 'userSettings' })}>
+      <IconButton label="Configurações" className="h-9 w-7 shrink-0" onClick={() => openModal({ type: 'userSettings' })}>
         <Settings size={18} />
       </IconButton>
     </div>

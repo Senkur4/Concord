@@ -137,6 +137,12 @@ export const IMAGE_SPECS = {
   banner: { w: 3, h: 1, size: '1200 × 400 px', note: 'Faixa larga (3:1). GIF animado vale.' },
   cardBg: { w: 2, h: 3, size: '800 × 1200 px', note: 'Em pé (2:3). GIF animado vale.' },
   background: { w: 16, h: 9, size: '1920 × 1080 px', note: 'Tela cheia (16:9). Em telas diferentes as bordas podem ser cortadas.' },
+  profileCover: {
+    w: 3,
+    h: 1,
+    size: '2560 × 830 px',
+    note: 'Larga, no formato das artes de jogo da Steam. Abaixo de 1920 × 620 fica borrada. O centro sempre aparece; o topo e a base podem ser cortados. Imagem ou GIF, até 8 MB.',
+  },
   patchLogo: { w: 1, h: 1, size: '512 × 512 px', note: 'Quadrada, PNG com fundo transparente. Depois de enviar dá para ajustar tamanho e posição.' },
   sticker: { w: 1, h: 1, size: '512 × 512 px', note: 'Quadrada, PNG ou GIF com fundo transparente.' },
 } as const;

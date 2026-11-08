@@ -455,6 +455,7 @@ export function MiniProfileBody({
           <div className="text-sm text-fg-muted">
             {member.nickname ? `${member.displayName} · ` : ''}@{member.username}
           </div>
+          <Integrations userId={member.id} />
           {member.mecenasBy && (
             <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-warn">
               <Gem size={12} /> Mecenas: @{member.mecenasBy}
@@ -572,6 +573,7 @@ function ModButton({ icon, label, onClick, danger }: { icon: React.ReactNode; la
 
 interface SteamSummary {
   linked: boolean;
+  profileUrl?: string;
   private?: boolean;
   total?: number;
   featured?: boolean;
@@ -605,6 +607,49 @@ function useSteamSummary(userId: string) {
     };
   }, [userId]);
   return data;
+}
+
+/** Logo da Steam (desenho simples, uma cor). */
+export function SteamLogo({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="11" fill="currentColor" />
+      <g fill="none" stroke="#1b2838" strokeLinecap="round">
+        <circle cx="15.6" cy="8.6" r="3.5" strokeWidth="1.7" />
+        <circle cx="8.3" cy="15.4" r="2.3" strokeWidth="1.6" />
+        <path d="M10 14 13.2 10.9" strokeWidth="2.3" />
+        <path d="M1.6 12.9 6.1 14.7" strokeWidth="1.7" />
+      </g>
+      <circle cx="15.6" cy="8.6" r="1.5" fill="#1b2838" />
+    </svg>
+  );
+}
+
+/** Contas conectadas (por enquanto só a Steam): selos logo abaixo do @, como no Discord. */
+function Integrations({ userId }: { userId: string }) {
+  const steam = useSteamSummary(userId);
+  if (!steam?.linked) return null;
+  const pill = (
+    <>
+      <SteamLogo size={14} className="text-[#c7d5e0]" />
+      Steam
+    </>
+  );
+  const cls =
+    'inline-flex h-6 items-center gap-1.5 rounded-full bg-linear-to-r from-[#171a21] to-[#2a475e] pr-2.5 pl-1.5 text-[11px] font-bold tracking-wide text-[#c7d5e0] ring-1 ring-white/10';
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Contas conectadas">
+      {steam.profileUrl ? (
+        <a href={steam.profileUrl} target="_blank" rel="noopener noreferrer" title="Abrir o perfil na Steam" className={cx(cls, 'transition hover:brightness-125')}>
+          {pill}
+        </a>
+      ) : (
+        <span className={cls} title="Steam conectada">
+          {pill}
+        </span>
+      )}
+    </div>
+  );
 }
 
 const steamCapsule = (appid: number) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/capsule_sm_120.jpg`;

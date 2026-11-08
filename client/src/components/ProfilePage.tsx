@@ -14,7 +14,7 @@ import { useApp } from '../store/app';
 import { toast } from '../store/toast';
 import { PATCH_TILTS, PatchBadge } from './PatchBadge';
 import { SupporterPatch } from './SupporterPatch';
-import { Avatar, Button, IconButton, Spinner, VerifiedBadge, cx, initials } from './ui';
+import { Avatar, Button, IconButton, ImageHint, Spinner, VerifiedBadge, cx, initials } from './ui';
 
 type Showcase = 'playing' | 'steam' | 'patches' | 'servers';
 const SECTIONS: { id: Showcase; label: string }[] = [
@@ -853,6 +853,10 @@ function Editor({
     if (!file) return;
     setBusy(true);
     try {
+      const size = await imageSize(file);
+      if (size && size.w < 1920) {
+        toast.info(`A imagem tem ${size.w} × ${size.h} px: na capa ela vai ficar um pouco borrada. O ideal é 2560 × 830 px.`);
+      }
       const blob = await prepareImage(file, 2560, false);
       onChange(await uploadImage<PageStyle>('/me/profile-bg', blob));
     } catch (err) {
@@ -883,7 +887,7 @@ function Editor({
             </IconButton>
           )}
         </div>
-        <p className="text-xs text-fg-subtle">Imagem ou GIF, até 8 MB. Ela fica no topo e se dissolve na página.</p>
+        <ImageHint spec="profileCover" className="items-start" />
         <label className="flex items-center gap-2.5 text-sm">
           <input type="checkbox" checked={page.favoriteAsBg} onChange={(e) => void save({ favoriteAsBg: e.target.checked })} className="h-4 w-4 accent-[var(--color-accent)]" />
           Sem imagem, usar a arte de um jogo
@@ -961,4 +965,21 @@ function Editor({
       </section>
     </aside>
   );
+}
+
+/** Largura e altura da imagem escolhida (null se o navegador não conseguir abrir). */
+function imageSize(file: File): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => {
+      resolve(null);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
 }

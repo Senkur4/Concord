@@ -15,6 +15,7 @@ import { mentionsMe } from '../lib/mentions';
 import { availableCommands, runCommand } from '../lib/commands';
 import { GameCard, GameMenuButton } from './Games';
 import { StickerButton, StickerMessage } from './StickerPicker';
+import { ComposerEmojiButton, insertAtCursor } from './EmojiCatalog';
 import { JamCard, useJamInMessage } from './Jam';
 import { ReplyBar, ReplyQuote, startReply } from './Replies';
 import { MobileBackButton } from './MobileNav';
@@ -337,6 +338,7 @@ interface Suggestion {
 /** Campo de mensagem em pílula, com comandos (/), menções (@) e aviso de quem está digitando. */
 export function Composer({ channel, compact = false }: { channel: Channel; compact?: boolean }) {
   const [text, setText] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const lastTyping = useRef(0);
@@ -535,23 +537,32 @@ export function Composer({ channel, compact = false }: { channel: Channel; compa
         <label className="sr-only" htmlFor={`composer-${channel.id}`}>
           Mensagem
         </label>
-        <textarea
-          id={`composer-${channel.id}`}
-          value={text}
-          disabled={!canSend}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={(e) => canSend && files.onPaste(e)}
-          rows={Math.min(6, text.split('\n').length)}
-          placeholder={placeholder}
-          aria-autocomplete="list"
-          aria-expanded={open}
-          className={cx(
-            'block max-h-48 min-w-0 flex-1 resize-none bg-surface-3 outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-accent/60 disabled:cursor-not-allowed',
-            compact ? 'px-4 py-2.5 text-sm' : 'px-5 py-3.5 text-[15px]',
-            text.includes('\n') ? 'rounded-3xl' : 'rounded-full',
+        <div className="relative min-w-0 flex-1">
+          <textarea
+            ref={inputRef}
+            id={`composer-${channel.id}`}
+            value={text}
+            disabled={!canSend}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={(e) => canSend && files.onPaste(e)}
+            rows={Math.min(6, text.split('\n').length)}
+            placeholder={placeholder}
+            aria-autocomplete="list"
+            aria-expanded={open}
+            className={cx(
+              'block max-h-48 w-full resize-none bg-surface-3 outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-accent/60 disabled:cursor-not-allowed',
+              compact ? 'py-2.5 pr-11 pl-4 text-sm' : 'py-3.5 pr-14 pl-5 text-[15px]',
+              text.includes('\n') ? 'rounded-3xl' : 'rounded-full',
+            )}
+          />
+          {canSend && (
+            <ComposerEmojiButton
+              className={cx('absolute', compact ? 'right-1.5 bottom-[3px]' : 'right-3 bottom-[7px]')}
+              onPick={(emoji) => insertAtCursor(inputRef.current, text, emoji, onChange)}
+            />
           )}
-        />
+        </div>
       </div>
       <div className="h-5 px-4 pt-1 text-xs text-fg-muted">
         {typers.length > 0 && (

@@ -1,4 +1,4 @@
-import { Download, Newspaper, MessageCircle, Plus } from 'lucide-react';
+import { CircleHelp, Download, Newspaper, MessageCircle, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { desktop } from '../lib/desktop';
@@ -105,6 +105,15 @@ export function ServerStrip() {
       >
         <Newspaper size={20} />
         {newReleases && !releasesOpen && <span className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-[3px] border-surface-2 bg-accent" />}
+      </button>
+      {/* ajuda: fininho, no canto direito da fileira (cabe ao lado das novidades) */}
+      <button
+        title="Como o Concord funciona"
+        aria-label="Como o Concord funciona"
+        onClick={() => openModal({ type: 'onboarding' })}
+        className="ml-auto flex h-12 w-7 shrink-0 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-surface-3 hover:text-fg"
+      >
+        <CircleHelp size={19} />
       </button>
       {!desktop && download && (
         <a

@@ -191,18 +191,21 @@ export function registerIntegrationRoutes(
     const u = get<UserRow>('SELECT steam_id FROM users WHERE id = ?', req.params.id);
     const showcase = hooks.steamShowcase(req.params.id);
     if (!u?.steam_id || !integrationsStatus().steam || !showcase.visible) return res.json({ linked: false });
+    // o selo "Steam" do mini-perfil leva para o perfil da pessoa na Steam
+    const profileUrl = `https://steamcommunity.com/profiles/${u.steam_id}`;
     let library: Awaited<ReturnType<typeof steamLibrary>>;
     try {
       library = await steamLibrary(u.steam_id);
     } catch {
-      return res.json({ linked: true, private: false, total: 0, games: [] }); // a Steam não respondeu: o cartão só não mostra os jogos
+      return res.json({ linked: true, profileUrl, private: false, total: 0, games: [] }); // a Steam não respondeu: o cartão só não mostra os jogos
     }
-    if (!library.games) return res.json({ linked: true, private: true, total: 0, games: [] });
+    if (!library.games) return res.json({ linked: true, profileUrl, private: true, total: 0, games: [] });
     const byId = new Map(library.games.map((g) => [g.appid, g]));
     const featured = showcase.featured.map((id) => byId.get(id)).filter((g): g is SteamGame => !!g);
     const pick = (featured.length ? featured : library.games).slice(0, 5);
     res.json({
       linked: true,
+      profileUrl,
       private: false,
       total: library.games.length,
       featured: featured.length > 0,

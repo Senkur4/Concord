@@ -14,6 +14,7 @@ import { activityLabel } from './MemberList';
 import { ReplyBar, ReplyQuote, startReply } from './Replies';
 import { MobileBackButton } from './MobileNav';
 import { Avatar, IconButton, Spinner, cx } from './ui';
+import { ComposerEmojiButton, insertAtCursor } from './EmojiCatalog';
 
 const EMPTY: Message[] = [];
 
@@ -338,6 +339,7 @@ function DmBubble({ message, grouped }: { message: Message; grouped: boolean }) 
 
 function DmComposer({ dm }: { dm: DirectChannel }) {
   const [text, setText] = useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const files = useAttachmentDraft();
   const replying = useApp((s) => s.replying[dm.id]);
   useEffect(() => {
@@ -380,19 +382,23 @@ function DmComposer({ dm }: { dm: DirectChannel }) {
         <label className="sr-only" htmlFor="dm-composer">
           Mensagem para {dm.user.displayName}
         </label>
-        <textarea
-          id="dm-composer"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={files.onPaste}
-          rows={Math.min(6, text.split('\n').length)}
-          placeholder={`Mensagem para ${dm.user.displayName}`}
-          className={cx(
-            'block max-h-48 min-w-0 flex-1 resize-none bg-surface-3 px-5 py-3.5 text-[15px] outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-accent/60',
-            text.includes('\n') ? 'rounded-3xl' : 'rounded-full',
-          )}
-        />
+        <div className="relative min-w-0 flex-1">
+          <textarea
+            ref={inputRef}
+            id="dm-composer"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={files.onPaste}
+            rows={Math.min(6, text.split('\n').length)}
+            placeholder={`Mensagem para ${dm.user.displayName}`}
+            className={cx(
+              'block max-h-48 w-full resize-none bg-surface-3 py-3.5 pr-14 pl-5 text-[15px] outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-accent/60',
+              text.includes('\n') ? 'rounded-3xl' : 'rounded-full',
+            )}
+          />
+          <ComposerEmojiButton className="absolute right-3 bottom-[7px]" onPick={(emoji) => insertAtCursor(inputRef.current, text, emoji, setText)} />
+        </div>
       </div>
     </div>
   );
