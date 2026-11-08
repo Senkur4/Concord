@@ -1,6 +1,6 @@
 // Anexos nas conversas (canais, chat da call e DMs): o arquivo sobe assim que é escolhido e só
 // aparece para alguém quando a mensagem é enviada junto com ele.
-import { Check, Download, FileText, Hourglass, Infinity as InfinityIcon, Paperclip, RotateCw, X } from 'lucide-react';
+import { Check, Download, FileText, Hourglass, Infinity as InfinityIcon, Paperclip, Play, RotateCw, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { uploadInChunks, type UploadProgress } from '../lib/chunkUpload';
 import type { Attachment } from '../lib/types';
@@ -373,19 +373,67 @@ const AUDIO_EXT = /\.(mp3|ogg|wav|m4a|flac)$/i;
  * Formato que o navegador não toca (alguns MKV) vira o cartão de baixar.
  */
 function VideoAttachment({ a }: { a: Attachment }) {
-  const [broken, setBroken] = useState(false);
-  if (broken) return <FileCard a={a} />;
+  const ref = useRef<HTMLVideoElement>(null);
+  const [state, setState] = useState<'idle' | 'playing' | 'noVideo' | 'broken'>('idle');
+  const [duration, setDuration] = useState(0);
+  if (state === 'broken') return <FileCard a={a} />;
+  if (state === 'noVideo') {
+    // o arquivo abre, mas o navegador não sabe desenhar a imagem (quase sempre H.265/HEVC)
+    return (
+      <div className="w-[min(480px,100%)] rounded-2xl bg-surface-3 p-3 ring-1 ring-line">
+        <FileCard a={a} />
+        <p className="mt-2 px-1 text-xs leading-relaxed text-fg-muted">
+          Este vídeo usa um formato que o navegador não consegue mostrar (provavelmente H.265/HEVC). Baixe para assistir, ou converta para H.264 (MP4) antes de
+          enviar.
+        </p>
+      </div>
+    );
+  }
+  const fmt = (t: number) => {
+    const s = Math.floor(t % 60).toString().padStart(2, '0');
+    const m = Math.floor(t / 60) % 60;
+    const h = Math.floor(t / 3600);
+    return h ? `${h}:${m.toString().padStart(2, '0')}:${s}` : `${m}:${s}`;
+  };
   return (
     <figure className="w-[min(480px,100%)] overflow-hidden rounded-2xl bg-black ring-1 ring-line">
-      <video
-        controls
-        preload="metadata"
-        playsInline
-        // #t=0.1: mostra a primeira imagem do vídeo no lugar de um quadro preto
-        src={`${a.url}#t=0.1`}
-        onError={() => setBroken(true)}
-        className="block max-h-[360px] w-full bg-black"
-      />
+      <div className="relative">
+        <video
+          ref={ref}
+          controls={state === 'playing'}
+          preload="metadata"
+          playsInline
+          // #t=0.1: mostra a primeira imagem do vídeo no lugar de um quadro preto
+          src={`${a.url}#t=0.1`}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            setDuration(v.duration);
+            if (!v.videoWidth && v.duration > 0) setState('noVideo');
+          }}
+          onError={() => setState('broken')}
+          onPlay={() => setState('playing')}
+          className="block aspect-video max-h-[360px] w-full bg-black object-contain"
+        />
+        {state === 'idle' && (
+          // botão grande de play, sempre visível (o do navegador só aparece com o mouse em cima)
+          <button
+            type="button"
+            aria-label={`Tocar ${a.name}`}
+            onClick={() => {
+              setState('playing');
+              void ref.current?.play().catch(() => {});
+            }}
+            className="group absolute inset-0 flex items-center justify-center bg-black/25 transition-colors hover:bg-black/10"
+          >
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 text-white ring-2 ring-white/80 backdrop-blur-sm transition-transform group-hover:scale-110">
+              <Play size={28} className="ml-1" fill="currentColor" />
+            </span>
+            {duration > 0 && (
+              <span className="absolute right-2 bottom-2 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-semibold text-white tabular-nums">{fmt(duration)}</span>
+            )}
+          </button>
+        )}
+      </div>
       <figcaption className="flex items-center gap-2 bg-surface-3 px-3 py-2 text-xs">
         <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
         <span className="shrink-0 text-fg-subtle">{formatSize(a.size)}</span>
