@@ -206,8 +206,17 @@ export interface Channel {
   topic: string;
   position: number;
   userLimit: number;
+  /** categoria onde o canal está (null = nos grupos padrão: Salas, Fóruns, Conversas) */
+  categoryId: string | null;
   overwrites: Overwrite[];
   permissions: number;
+}
+
+/** Categoria de canais, como no Discord. */
+export interface Category {
+  id: string;
+  name: string;
+  position: number;
 }
 
 export interface Member extends User {
@@ -347,6 +356,8 @@ export interface ServerDetail {
   highestPosition: number;
   roles: Role[];
   channels: Channel[];
+  /** servidores antigos (ou cache de antes da atualização) podem vir sem */
+  categories?: Category[];
   members: Member[];
   voiceStates: VoiceState[];
   jams?: Jam[];

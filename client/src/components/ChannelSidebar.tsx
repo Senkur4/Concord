@@ -1,5 +1,6 @@
 import {
   ChevronDown,
+  FolderPlus,
   Hash,
   HeadphoneOff,
   Headphones,
@@ -21,10 +22,10 @@ import {
   VideoOff,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { P, has } from '../../../shared/permissions.ts';
 import { api } from '../lib/api';
-import { memberName, type Channel, type ServerDetail, type VoiceState } from '../lib/types';
+import { memberName, type Category, type Channel, type ServerDetail, type VoiceState } from '../lib/types';
 import { HOME, memberColor, useActiveDetail, useApp } from '../store/app';
 import { DmSidebar } from './DirectMessages';
 import { armPopoverToggle, toggleOrOpenPopover } from '../store/popover';
@@ -50,11 +51,7 @@ export function ChannelSidebar() {
       ) : detail ? (
         <>
           <ServerHeader detail={detail} />
-          <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-3">
-            <ChannelGroup detail={detail} kind="voice" />
-            <ChannelGroup detail={detail} kind="forum" />
-            <ChannelGroup detail={detail} kind="text" />
-          </div>
+          <ChannelList detail={detail} />
         </>
       ) : (
         <div className="flex-1 px-5 py-6 text-sm text-fg-muted">Escolha um servidor acima ou crie um novo no +.</div>
@@ -123,6 +120,7 @@ function ServerHeader({ detail }: { detail: ServerDetail }) {
             item('Configurações do servidor', <Settings size={16} />, () => openModal({ type: 'serverSettings', serverId: detail.server.id }))}
           {item('Patches do servidor', <Shirt size={16} />, () => openModal({ type: 'serverSettings', serverId: detail.server.id, tab: 'patches' }))}
           {has(perms, P.MANAGE_CHANNELS) && item('Criar sala ou canal', <Plus size={16} />, () => openModal({ type: 'createChannel', serverId: detail.server.id, kind: 'voice' }))}
+          {has(perms, P.MANAGE_CHANNELS) && item('Criar categoria', <FolderPlus size={16} />, () => openModal({ type: 'createCategory', serverId: detail.server.id }))}
           <div className="mx-2 my-1 h-px bg-line" />
           {isOwner
             ? item(
@@ -169,15 +167,151 @@ function ServerHeader({ detail }: { detail: ServerDetail }) {
 const GROUP_LABEL = { voice: 'Salas', forum: 'Fóruns', text: 'Conversas' } as const;
 const CREATE_LABEL = { voice: 'Criar sala', forum: 'Criar fórum', text: 'Criar canal de texto' } as const;
 
-function ChannelGroup({ detail, kind }: { detail: ServerDetail; kind: 'text' | 'voice' | 'forum' }) {
-  const channels = detail.channels.filter((c) => c.type === kind).sort((a, b) => a.position - b.position);
+// ---- arrastar e soltar (só para quem gerencia canais; no celular, use as configurações do canal/categoria)
+
+type Dragging = { kind: 'channel' | 'category'; id: string } | null;
+interface DragState {
+  enabled: boolean;
+  dragging: Dragging;
+  over: string | null;
+  setDragging: (d: Dragging) => void;
+  setOver: (key: string | null) => void;
+}
+const DragCtx = createContext<DragState>({ enabled: false, dragging: null, over: null, setDragging: () => {}, setOver: () => {} });
+
+/** Liga um elemento como alvo de soltura: accept diz se aceita o que está sendo arrastado. */
+function useDropTarget(key: string, accept: (d: NonNullable<Dragging>) => boolean, onDrop: (d: NonNullable<Dragging>) => void) {
+  const ctx = useContext(DragCtx);
+  const active = ctx.enabled && !!ctx.dragging && accept(ctx.dragging);
+  return {
+    isOver: active && ctx.over === key,
+    handlers: active
+      ? {
+          onDragOver: (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            if (ctx.over !== key) ctx.setOver(key);
+          },
+          onDragLeave: (e: DragEvent) => {
+            if (!(e.currentTarget as Node).contains(e.relatedTarget as Node) && ctx.over === key) ctx.setOver(null);
+          },
+          onDrop: (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const d = ctx.dragging!;
+            ctx.setDragging(null);
+            ctx.setOver(null);
+            onDrop(d);
+          },
+        }
+      : {},
+  };
+}
+
+function useDragSource(kind: 'channel' | 'category', id: string) {
+  const ctx = useContext(DragCtx);
+  if (!ctx.enabled) return { dragging: false, handlers: {} };
+  return {
+    dragging: ctx.dragging?.kind === kind && ctx.dragging.id === id,
+    handlers: {
+      draggable: true,
+      onDragStart: (e: DragEvent) => {
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+        ctx.setDragging({ kind, id });
+      },
+      onDragEnd: () => {
+        ctx.setDragging(null);
+        ctx.setOver(null);
+      },
+    },
+  };
+}
+
+const moveChannel = (id: string, body: { categoryId?: string | null; beforeId?: string | null }) => void api.patch(`/channels/${id}`, body).catch(toast.error);
+const moveCategory = (id: string, beforeId: string | null) => void api.patch(`/categories/${id}`, { beforeId }).catch(toast.error);
+
+/** Linha fina indicando onde o item vai entrar (antes deste). */
+const dropLine = 'relative before:pointer-events-none before:absolute before:inset-x-2 before:-top-[3px] before:z-10 before:h-[3px] before:rounded-full before:bg-accent';
+
+// ---- categorias recolhidas: lembradas neste navegador
+
+const COLLAPSED_KEY = 'concord:categorias-recolhidas';
+function readCollapsed(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+function useCollapsed(categoryId: string): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState(() => readCollapsed().includes(categoryId));
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      const list = readCollapsed().filter((id) => id !== categoryId);
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next ? [...list, categoryId] : list));
+    } catch {
+      // sem armazenamento: recolhe só até recarregar
+    }
+  };
+  return [collapsed, toggle];
+}
+
+const byPosition = (a: { position: number; name: string }, b: { position: number; name: string }) => a.position - b.position || a.name.localeCompare(b.name);
+
+function ChannelList({ detail }: { detail: ServerDetail }) {
+  const [dragging, setDragging] = useState<Dragging>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const enabled = has(detail.permissions, P.MANAGE_CHANNELS);
+  const categories = [...(detail.categories ?? [])].sort(byPosition);
+  return (
+    <DragCtx.Provider value={{ enabled, dragging, over, setDragging, setOver }}>
+      <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-3">
+        <ChannelGroup detail={detail} kind="voice" hasCategories={categories.length > 0} />
+        <ChannelGroup detail={detail} kind="forum" hasCategories={categories.length > 0} />
+        <ChannelGroup detail={detail} kind="text" hasCategories={categories.length > 0} />
+        {categories.map((cat) => (
+          <CategorySection key={cat.id} detail={detail} category={cat} />
+        ))}
+      </div>
+    </DragCtx.Provider>
+  );
+}
+
+/** Um canal na lista, que pode ser arrastado e recebe outro canal soltado em cima (entra antes dele). */
+function ChannelItem({ detail, channel }: { detail: ServerDetail; channel: Channel }) {
+  const source = useDragSource('channel', channel.id);
+  const target = useDropTarget(
+    `ch:${channel.id}`,
+    (d) => d.kind === 'channel' && d.id !== channel.id,
+    (d) => moveChannel(d.id, { categoryId: channel.categoryId ?? null, beforeId: channel.id }),
+  );
+  return (
+    <div {...source.handlers} {...target.handlers} className={cx(target.isOver && dropLine, source.dragging && 'opacity-40')}>
+      {channel.type === 'voice' ? <RoomCard detail={detail} channel={channel} /> : <TextChannelRow detail={detail} channel={channel} />}
+    </div>
+  );
+}
+
+/** Grupos padrão (Salas, Fóruns, Conversas): canais sem categoria. Soltar um canal no título tira ele da categoria. */
+function ChannelGroup({ detail, kind, hasCategories }: { detail: ServerDetail; kind: 'text' | 'voice' | 'forum'; hasCategories: boolean }) {
+  const channels = detail.channels.filter((c) => c.type === kind && !c.categoryId).sort(byPosition);
   const openModal = useApp((s) => s.openModal);
   const canManage = has(detail.permissions, P.MANAGE_CHANNELS);
-  // servidor sem fóruns não mostra o grupo vazio
-  if (kind === 'forum' && channels.length === 0) return null;
+  const target = useDropTarget(
+    `group:${kind}`,
+    (d) => d.kind === 'channel' && detail.channels.find((c) => c.id === d.id)?.type === kind,
+    (d) => moveChannel(d.id, { categoryId: null, beforeId: null }),
+  );
+  // servidor sem fóruns não mostra o grupo vazio; com categorias, grupo vazio só aparece para quem pode arrastar para ele
+  if (channels.length === 0 && (kind === 'forum' || (hasCategories && !canManage))) return null;
 
   return (
-    <section>
+    <section {...target.handlers} className={cx('rounded-2xl transition-colors', target.isOver && 'bg-accent/10 ring-1 ring-accent/50')}>
       <div className="group mb-1.5 flex items-center justify-between px-2">
         <h2 className="font-sans text-xs font-bold text-fg-subtle">{GROUP_LABEL[kind]}</h2>
         {canManage && (
@@ -191,8 +325,93 @@ function ChannelGroup({ detail, kind }: { detail: ServerDetail; kind: 'text' | '
         )}
       </div>
       <div className={kind === 'voice' ? 'space-y-2' : 'space-y-0.5'}>
-        {channels.map((c) => (kind === 'voice' ? <RoomCard key={c.id} detail={detail} channel={c} /> : <TextChannelRow key={c.id} detail={detail} channel={c} />))}
+        {channels.map((c) => (
+          <ChannelItem key={c.id} detail={detail} channel={c} />
+        ))}
       </div>
+    </section>
+  );
+}
+
+/** Uma categoria: título recolhível; dentro, canais de texto e fóruns primeiro, salas de voz depois (como no Discord). */
+function CategorySection({ detail, category }: { detail: ServerDetail; category: Category }) {
+  const serverId = detail.server.id;
+  const openModal = useApp((s) => s.openModal);
+  const activeChannel = useApp((s) => s.activeChannels[serverId]);
+  const states = useApp((s) => s.voiceStates[serverId]) ?? [];
+  const connectedTo = useVoice((s) => (s.status !== 'idle' ? s.channelId : null));
+  const [collapsed, toggle] = useCollapsed(category.id);
+  const canManage = has(detail.permissions, P.MANAGE_CHANNELS);
+
+  const inside = detail.channels.filter((c) => c.categoryId === category.id);
+  const ordered = [...inside.filter((c) => c.type !== 'voice').sort(byPosition), ...inside.filter((c) => c.type === 'voice').sort(byPosition)];
+  // recolhida: continua mostrando o canal aberto e as salas com gente (como no Discord)
+  const visible = collapsed
+    ? ordered.filter((c) => c.id === activeChannel || c.id === connectedTo || (c.type === 'voice' && states.some((v) => v.channelId === c.id)))
+    : ordered;
+  const texts = visible.filter((c) => c.type !== 'voice');
+  const rooms = visible.filter((c) => c.type === 'voice');
+
+  const source = useDragSource('category', category.id);
+  const target = useDropTarget(
+    `cat:${category.id}`,
+    (d) => (d.kind === 'category' ? d.id !== category.id : true),
+    (d) => (d.kind === 'category' ? moveCategory(d.id, category.id) : moveChannel(d.id, { categoryId: category.id, beforeId: null })),
+  );
+  const draggedIsChannel = useContext(DragCtx).dragging?.kind === 'channel';
+
+  return (
+    <section className={cx(source.dragging && 'opacity-40')}>
+      <div
+        {...source.handlers}
+        {...target.handlers}
+        className={cx(
+          'group mb-1.5 flex items-center gap-1 rounded-xl px-1 transition-colors',
+          target.isOver && (draggedIsChannel ? 'bg-accent/10 ring-1 ring-accent/50' : dropLine),
+        )}
+      >
+        <button onClick={toggle} aria-expanded={!collapsed} className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-fg-subtle hover:text-fg">
+          <ChevronDown size={13} className={cx('shrink-0 transition-transform', collapsed && '-rotate-90')} />
+          <h2 className="truncate font-sans text-xs font-bold">{category.name}</h2>
+        </button>
+        {canManage && (
+          <>
+            <IconButton
+              label="Criar canal nesta categoria"
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              onClick={() => openModal({ type: 'createChannel', serverId, kind: 'text', categoryId: category.id })}
+            >
+              <Plus size={15} />
+            </IconButton>
+            <IconButton
+              label="Editar categoria"
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              onClick={() => openModal({ type: 'categorySettings', serverId, categoryId: category.id })}
+            >
+              <Settings size={13} />
+            </IconButton>
+          </>
+        )}
+      </div>
+      {texts.length > 0 && (
+        <div className="space-y-0.5">
+          {texts.map((c) => (
+            <ChannelItem key={c.id} detail={detail} channel={c} />
+          ))}
+        </div>
+      )}
+      {rooms.length > 0 && (
+        <div className={cx('space-y-2', texts.length > 0 && 'mt-2')}>
+          {rooms.map((c) => (
+            <ChannelItem key={c.id} detail={detail} channel={c} />
+          ))}
+        </div>
+      )}
+      {!collapsed && inside.length === 0 && canManage && (
+        <div className="rounded-2xl border border-dashed border-line px-3 py-3 text-center text-xs text-fg-subtle">
+          Arraste canais para cá, ou crie um no +
+        </div>
+      )}
     </section>
   );
 }

@@ -284,6 +284,19 @@ if (!channelsSql.includes("'forum'")) {
   }
 }
 
+// Categorias de canais (como no Discord): agrupam canais de qualquer tipo. Canal sem categoria fica nos grupos
+// padrão (Salas, Fóruns, Conversas). Apagar a categoria só solta os canais dela.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_categories_server ON categories(server_id, position);
+`);
+addColumn('channels', 'category_id', 'TEXT REFERENCES categories(id) ON DELETE SET NULL');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS forum_posts (
     id TEXT PRIMARY KEY,
@@ -764,6 +777,14 @@ export interface ChannelRow {
   topic: string;
   position: number;
   user_limit: number;
+  category_id: string | null;
+}
+
+export interface CategoryRow {
+  id: string;
+  server_id: string;
+  name: string;
+  position: number;
 }
 
 export interface OverwriteRow {

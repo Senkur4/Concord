@@ -27,6 +27,7 @@ import {
   get,
   run,
   tx,
+  type CategoryRow,
   type ChannelRow,
   type CustomStickerRow,
   type AttachmentRow,
@@ -1303,9 +1304,15 @@ api.get('/servers/:id', (req, res) => {
       topic: c.topic,
       position: c.position,
       userLimit: c.user_limit,
+      categoryId: c.category_id,
       overwrites: channelOverwrites(c.id),
       permissions: perms,
     }));
+  // categoria sem nenhum canal visível só aparece para quem gerencia canais (para poder usá-la)
+  const canManageChannels = has(perms, P.MANAGE_CHANNELS);
+  const categories = all<CategoryRow>('SELECT * FROM categories WHERE server_id = ? ORDER BY position, name', server.id)
+    .filter((cat) => canManageChannels || channels.some((c) => c.categoryId === cat.id))
+    .map((cat) => ({ id: cat.id, name: cat.name, position: cat.position }));
 
   const memberRows = all<UserRow & { joined_at: number; nickname: string | null }>(
     `SELECT u.*, m.joined_at, m.nickname FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = ? ORDER BY m.joined_at`,
@@ -1325,6 +1332,7 @@ api.get('/servers/:id', (req, res) => {
     highestPosition: highestPosition(server.id, me) === Infinity ? 1e9 : highestPosition(server.id, me),
     roles: roles.map(roleJson),
     channels,
+    categories,
     members,
     voiceStates: voiceStatesFor(server.id),
     jams: jamsFor(server.id),
@@ -1440,8 +1448,43 @@ function removeMember(serverId: string, userId: string) {
 
 // ============================================================ Canais
 
-function normalizeChannelName(name: string, type: string) {
-  return type !== 'voice' ? name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '') || 'canal' : name;
+// canais de texto e fórum: minúsculas e hífens no lugar de espaços, como no Discord. Emojis ficam (inclusive os
+// compostos, como bandeiras, tons de pele e 👨‍👩‍👧). Salas de voz aceitam o nome como foi digitado.
+const CHANNEL_NAME_STRIP = /[^\p{L}\p{N}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200d\ufe0f\u20e3_-]/gu;
+
+export function normalizeChannelName(name: string, type: string) {
+  return type !== 'voice' ? name.toLowerCase().replace(/\s+/g, '-').replace(CHANNEL_NAME_STRIP, '') || 'canal' : name;
+}
+
+/** Valida uma categoria do servidor (null = sem categoria). */
+function categoryOf(serverId: string, value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') fail(400, 'Categoria inválida');
+  const cat = get<CategoryRow>('SELECT * FROM categories WHERE id = ?', value as string);
+  if (!cat || cat.server_id !== serverId) fail(400, 'Categoria inválida');
+  return cat!.id;
+}
+
+const sameCategory = (categoryId: string | null) => (categoryId === null ? 'category_id IS NULL' : 'category_id = ?');
+const categoryArgs = (categoryId: string | null) => (categoryId === null ? [] : [categoryId]);
+
+/** Renumera as posições dos canais de uma categoria (ou dos sem categoria) na ordem dada. */
+function writeChannelOrder(ids: string[]) {
+  tx(() => ids.forEach((id, idx) => run('UPDATE channels SET position = ? WHERE id = ?', idx, id)));
+}
+
+/** Coloca o canal na categoria, antes de outro canal (beforeId) ou no fim. */
+function placeChannel(channel: ChannelRow, categoryId: string | null, beforeId: string | null) {
+  const siblings = all<ChannelRow>(
+    `SELECT * FROM channels WHERE server_id = ? AND ${sameCategory(categoryId)} AND id != ? ORDER BY position, name`,
+    channel.server_id,
+    ...categoryArgs(categoryId),
+    channel.id,
+  ).map((c) => c.id);
+  const at = beforeId ? siblings.indexOf(beforeId) : -1;
+  siblings.splice(at >= 0 ? at : siblings.length, 0, channel.id);
+  run('UPDATE channels SET category_id = ? WHERE id = ?', categoryId, channel.id);
+  writeChannelOrder(siblings);
 }
 
 api.post('/servers/:id/channels', (req, res) => {
@@ -1449,9 +1492,14 @@ api.post('/servers/:id/channels', (req, res) => {
   const type = req.body?.type === 'voice' || req.body?.type === 'forum' ? req.body.type : 'text';
   const name = normalizeChannelName(str(req.body?.name, 'nome', 1, 50), type);
   const topic = optStr(req.body?.topic, 'tópico', 0, 300) ?? '';
-  const pos = get<{ p: number }>('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM channels WHERE server_id = ? AND type = ?', server.id, type)!.p;
+  const categoryId = categoryOf(server.id, req.body?.categoryId);
+  const pos = get<{ p: number }>(
+    `SELECT COALESCE(MAX(position), -1) + 1 AS p FROM channels WHERE server_id = ? AND ${sameCategory(categoryId)}`,
+    server.id,
+    ...categoryArgs(categoryId),
+  )!.p;
   const id = randomUUID();
-  run('INSERT INTO channels (id, server_id, name, type, topic, position) VALUES (?, ?, ?, ?, ?, ?)', id, server.id, name, type, topic, pos);
+  run('INSERT INTO channels (id, server_id, name, type, topic, position, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)', id, server.id, name, type, topic, pos, categoryId);
   if (req.body?.private === true) {
     run('INSERT INTO channel_overwrites (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)', id, everyoneRole(server.id).id, P.VIEW_CHANNEL);
   }
@@ -1468,13 +1516,30 @@ api.patch('/channels/:id', (req, res) => {
   if (req.body?.userLimit !== undefined) {
     run('UPDATE channels SET user_limit = ? WHERE id = ?', Math.max(0, Math.min(99, int(req.body.userLimit, 'limite'))), channel.id);
   }
+  // trocar de categoria (null = tirar da categoria); com beforeId, entra antes daquele canal (arrastar e soltar)
+  if (req.body?.categoryId !== undefined || req.body?.beforeId !== undefined) {
+    const categoryId = req.body?.categoryId !== undefined ? categoryOf(channel.server_id, req.body.categoryId) : channel.category_id;
+    const beforeId = typeof req.body?.beforeId === 'string' ? req.body.beforeId : null;
+    placeChannel(channel, categoryId, beforeId);
+  }
   if (req.body?.move === 'up' || req.body?.move === 'down') {
-    const siblings = all<ChannelRow>('SELECT * FROM channels WHERE server_id = ? AND type = ? ORDER BY position, name', channel.server_id, channel.type);
-    const i = siblings.findIndex((c) => c.id === channel.id);
+    // sobe/desce entre os vizinhos que aparecem juntos: mesma categoria e, nela, salas de voz separadas do resto
+    const current = get<ChannelRow>('SELECT * FROM channels WHERE id = ?', channel.id)!;
+    const all_ = all<ChannelRow>(
+      `SELECT * FROM channels WHERE server_id = ? AND ${sameCategory(current.category_id)} ORDER BY position, name`,
+      current.server_id,
+      ...categoryArgs(current.category_id),
+    );
+    const group = (c: ChannelRow) => (current.category_id === null ? c.type : c.type === 'voice' ? 'voice' : 'text');
+    const siblings = all_.filter((c) => group(c) === group(current));
+    const i = siblings.findIndex((c) => c.id === current.id);
     const j = req.body.move === 'up' ? i - 1 : i + 1;
     if (j >= 0 && j < siblings.length) {
-      [siblings[i], siblings[j]] = [siblings[j], siblings[i]];
-      tx(() => siblings.forEach((c, idx) => run('UPDATE channels SET position = ? WHERE id = ?', idx, c.id)));
+      const order = all_.map((c) => c.id);
+      const a = order.indexOf(siblings[i].id);
+      const b = order.indexOf(siblings[j].id);
+      [order[a], order[b]] = [order[b], order[a]];
+      writeChannelOrder(order);
     }
   }
   serverChanged(channel.server_id);
@@ -1490,6 +1555,64 @@ api.delete('/channels/:id', (req, res) => {
   }
   run('DELETE FROM channels WHERE id = ?', channel.id);
   serverChanged(channel.server_id);
+  res.json({ ok: true });
+});
+
+// ============================================================ Categorias
+
+function requireCategoryPerm(categoryId: string, userId: string): CategoryRow {
+  const cat = get<CategoryRow>('SELECT * FROM categories WHERE id = ?', categoryId);
+  if (!cat) fail(404, 'Categoria não encontrada');
+  requireServerPerm(cat!.server_id, userId, P.MANAGE_CHANNELS);
+  return cat!;
+}
+
+api.post('/servers/:id/categories', (req, res) => {
+  const server = requireServerPerm(req.params.id, uid(res), P.MANAGE_CHANNELS);
+  const name = str(req.body?.name, 'nome', 1, 50);
+  const count = get<{ n: number }>('SELECT COUNT(*) AS n FROM categories WHERE server_id = ?', server.id)!.n;
+  if (count >= 50) fail(400, 'Limite de 50 categorias por servidor');
+  const pos = get<{ p: number }>('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM categories WHERE server_id = ?', server.id)!.p;
+  const id = randomUUID();
+  run('INSERT INTO categories (id, server_id, name, position) VALUES (?, ?, ?, ?)', id, server.id, name, pos);
+  serverChanged(server.id);
+  res.json({ id });
+});
+
+api.patch('/categories/:id', (req, res) => {
+  const cat = requireCategoryPerm(req.params.id, uid(res));
+  const name = optStr(req.body?.name, 'nome', 1, 50);
+  if (name) run('UPDATE categories SET name = ? WHERE id = ?', name, cat.id);
+  const order = all<CategoryRow>('SELECT * FROM categories WHERE server_id = ? ORDER BY position, name', cat.server_id).map((c) => c.id);
+  let reordered = false;
+  if (req.body?.move === 'up' || req.body?.move === 'down') {
+    const i = order.indexOf(cat.id);
+    const j = req.body.move === 'up' ? i - 1 : i + 1;
+    if (j >= 0 && j < order.length) [order[i], order[j]] = [order[j], order[i]];
+    reordered = true;
+  } else if (req.body?.beforeId !== undefined) {
+    // arrastar e soltar: entra antes da categoria beforeId (null = no fim)
+    order.splice(order.indexOf(cat.id), 1);
+    const at = typeof req.body.beforeId === 'string' ? order.indexOf(req.body.beforeId) : -1;
+    order.splice(at >= 0 ? at : order.length, 0, cat.id);
+    reordered = true;
+  }
+  if (reordered) tx(() => order.forEach((id, idx) => run('UPDATE categories SET position = ? WHERE id = ?', idx, id)));
+  serverChanged(cat.server_id);
+  res.json({ ok: true });
+});
+
+api.delete('/categories/:id', (req, res) => {
+  const cat = requireCategoryPerm(req.params.id, uid(res));
+  // os canais não são apagados: voltam para os grupos padrão, no fim
+  const loose = all<ChannelRow>('SELECT * FROM channels WHERE server_id = ? AND category_id IS NULL ORDER BY position, name', cat.server_id).map((c) => c.id);
+  const freed = all<ChannelRow>('SELECT * FROM channels WHERE category_id = ? ORDER BY position, name', cat.id).map((c) => c.id);
+  tx(() => {
+    run('UPDATE channels SET category_id = NULL WHERE category_id = ?', cat.id);
+    run('DELETE FROM categories WHERE id = ?', cat.id);
+  });
+  writeChannelOrder([...loose, ...freed]);
+  serverChanged(cat.server_id);
   res.json({ ok: true });
 });
 

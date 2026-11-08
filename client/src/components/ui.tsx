@@ -1,5 +1,5 @@
 import { BadgeCheck, Eye, EyeOff, X } from 'lucide-react';
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref } from 'react';
 import { useToasts } from '../store/toast';
 
 export function cx(...parts: (string | false | null | undefined)[]) {
@@ -216,7 +216,7 @@ export function IconButton({
   );
 }
 
-export function Input({ label, hint, className, type, ...props }: InputHTMLAttributes<HTMLInputElement> & { label?: string; hint?: string }) {
+export function Input({ label, hint, className, type, ...props }: InputHTMLAttributes<HTMLInputElement> & { label?: string; hint?: string; ref?: Ref<HTMLInputElement> }) {
   const [revealed, setRevealed] = useState(false);
   const isPassword = type === 'password';
   return (

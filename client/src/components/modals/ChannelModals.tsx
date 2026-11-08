@@ -1,10 +1,12 @@
-import { ArrowDown, ArrowUp, Check, Hash, MessagesSquare, Slash, Trash2, Volume2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, FolderClosed, Hash, MessagesSquare, Slash, Trash2, Volume2, X } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { P, PERMISSION_INFO, has } from '../../../../shared/permissions.ts';
 import { api } from '../../lib/api';
 import { useApp } from '../../store/app';
 import { toast } from '../../store/toast';
 import { Button, Input, Modal, RoleDot, Toggle, cx } from '../ui';
+import { NameInput } from '../EmojiPicker';
+import type { ServerDetail } from '../../lib/types';
 
 const TYPE_INFO = {
   text: { icon: <Hash size={22} />, label: 'Texto', hint: 'Mensagens, links e imagens' },
@@ -12,10 +14,35 @@ const TYPE_INFO = {
   voice: { icon: <Volume2 size={22} />, label: 'Sala de voz', hint: 'Voz, câmera e transmissão de tela a 60 fps' },
 } as const;
 
-export function CreateChannelModal({ serverId, kind }: { serverId: string; kind: 'text' | 'voice' | 'forum' }) {
+/** Seletor de categoria (some quando o servidor não tem nenhuma). */
+function CategorySelect({ detail, value, onChange }: { detail: ServerDetail; value: string | null; onChange: (v: string | null) => void }) {
+  const categories = [...(detail.categories ?? [])].sort((a, b) => a.position - b.position);
+  if (!categories.length) return null;
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-bold text-fg-muted">Categoria</span>
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="h-11 w-full rounded-2xl border border-transparent bg-surface-3 px-4 text-sm text-fg outline-none focus:border-accent"
+      >
+        <option value="">Sem categoria</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function CreateChannelModal({ serverId, kind, categoryId: initialCategory = null }: { serverId: string; kind: 'text' | 'voice' | 'forum'; categoryId?: string | null }) {
   const close = useApp((s) => s.closeModal);
+  const detail = useApp((s) => s.details[serverId]);
   const [type, setType] = useState(kind);
   const [name, setName] = useState('');
+  const [categoryId, setCategoryId] = useState<string | null>(initialCategory);
   const [isPrivate, setPrivate] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -23,7 +50,7 @@ export function CreateChannelModal({ serverId, kind }: { serverId: string; kind:
     e.preventDefault();
     setLoading(true);
     try {
-      const { id } = await api.post<{ id: string }>(`/servers/${serverId}/channels`, { name, type, private: isPrivate });
+      const { id } = await api.post<{ id: string }>(`/servers/${serverId}/channels`, { name, type, private: isPrivate, categoryId });
       await useApp.getState().loadDetail(serverId);
       useApp.getState().openChannel(serverId, id);
       close();
@@ -56,7 +83,8 @@ export function CreateChannelModal({ serverId, kind }: { serverId: string; kind:
             </button>
           ))}
         </div>
-        <Input label="Nome do canal" value={name} onChange={(e) => setName(e.target.value)} placeholder={type === 'voice' ? 'Nova sala' : type === 'forum' ? 'ideias' : 'novo-canal'} autoFocus required maxLength={50} />
+        <NameInput label="Nome do canal" value={name} onValueChange={setName} placeholder={type === 'voice' ? '🔊 Nova sala' : type === 'forum' ? 'ideias' : 'novo-canal'} autoFocus required maxLength={50} />
+        {detail && <CategorySelect detail={detail} value={categoryId} onChange={setCategoryId} />}
         <div className="flex items-center justify-between rounded-xl bg-surface-0 p-3">
           <div>
             <div className="text-sm font-semibold">Canal privado</div>
@@ -81,13 +109,15 @@ export function ChannelSettingsModal({ serverId, channelId }: { serverId: string
   const [name, setName] = useState(channel?.name ?? '');
   const [topic, setTopic] = useState(channel?.topic ?? '');
   const [userLimit, setUserLimit] = useState(channel?.userLimit ?? 0);
+  const [categoryId, setCategoryId] = useState<string | null>(channel?.categoryId ?? null);
   const [saving, setSaving] = useState(false);
   if (!detail || !channel) return null;
 
   async function save() {
     setSaving(true);
     try {
-      await api.patch(`/channels/${channelId}`, { name, topic, userLimit });
+      const moved = categoryId !== (channel!.categoryId ?? null);
+      await api.patch(`/channels/${channelId}`, { name, topic, userLimit, ...(moved ? { categoryId } : {}) });
       toast.success('Canal atualizado');
     } catch (err) {
       toast.error(err);
@@ -111,7 +141,8 @@ export function ChannelSettingsModal({ serverId, channelId }: { serverId: string
 
       {tab === 'overview' ? (
         <div className="space-y-4">
-          <Input label="Nome" value={name} onChange={(e) => setName(e.target.value)} maxLength={50} />
+          <NameInput label="Nome" value={name} onValueChange={setName} maxLength={50} />
+          <CategorySelect detail={detail} value={categoryId} onChange={setCategoryId} />
           {channel.type !== 'voice' ? (
             <Input label="Tópico" value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={300} placeholder="Do que se trata este canal?" />
           ) : (
@@ -155,6 +186,99 @@ export function ChannelSettingsModal({ serverId, channelId }: { serverId: string
       ) : (
         <ChannelPermissions serverId={serverId} channelId={channelId} />
       )}
+    </Modal>
+  );
+}
+
+export function CreateCategoryModal({ serverId }: { serverId: string }) {
+  const close = useApp((s) => s.closeModal);
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.post(`/servers/${serverId}/categories`, { name });
+      await useApp.getState().loadDetail(serverId);
+      close();
+    } catch (err) {
+      toast.error(err);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal title={<span className="flex items-center gap-2"><FolderClosed size={20} /> Criar categoria</span>} onClose={close}>
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm text-fg-muted">Agrupe salas e canais, como no Discord. Depois, arraste os canais para dentro dela, ou escolha a categoria nas configurações do canal.</p>
+        <NameInput label="Nome da categoria" value={name} onValueChange={setName} placeholder="🎮 Jogos" autoFocus required maxLength={50} />
+        <Button type="submit" loading={loading} className="w-full" disabled={!name.trim()}>
+          Criar categoria
+        </Button>
+      </form>
+    </Modal>
+  );
+}
+
+export function CategorySettingsModal({ serverId, categoryId }: { serverId: string; categoryId: string }) {
+  const close = useApp((s) => s.closeModal);
+  const openModal = useApp((s) => s.openModal);
+  const detail = useApp((s) => s.details[serverId]);
+  const category = detail?.categories?.find((c) => c.id === categoryId);
+  const [name, setName] = useState(category?.name ?? '');
+  const [saving, setSaving] = useState(false);
+  if (!detail || !category) return null;
+  const inside = detail.channels.filter((c) => c.categoryId === categoryId).length;
+
+  async function save() {
+    setSaving(true);
+    try {
+      await api.patch(`/categories/${categoryId}`, { name });
+      toast.success('Categoria atualizada');
+    } catch (err) {
+      toast.error(err);
+    }
+    setSaving(false);
+  }
+
+  return (
+    <Modal title={<span className="flex items-center gap-2"><FolderClosed size={20} /> {category.name}</span>} onClose={close}>
+      <div className="space-y-4">
+        <NameInput label="Nome" value={name} onValueChange={setName} maxLength={50} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={save} loading={saving} disabled={!name.trim()}>
+            Salvar alterações
+          </Button>
+          <Button variant="secondary" onClick={() => void api.patch(`/categories/${categoryId}`, { move: 'up' }).catch(toast.error)}>
+            <ArrowUp size={16} /> Subir
+          </Button>
+          <Button variant="secondary" onClick={() => void api.patch(`/categories/${categoryId}`, { move: 'down' }).catch(toast.error)}>
+            <ArrowDown size={16} /> Descer
+          </Button>
+          <div className="flex-1" />
+          <Button
+            variant="danger"
+            onClick={() =>
+              openModal({
+                type: 'confirm',
+                title: `Apagar a categoria "${category.name}"`,
+                message: inside
+                  ? `Os ${inside === 1 ? '1 canal' : `${inside} canais`} dela não serão apagados: ${inside === 1 ? 'ele volta' : 'eles voltam'} para fora de categoria.`
+                  : 'A categoria está vazia.',
+                confirmLabel: 'Apagar categoria',
+                danger: true,
+                onConfirm: async () => {
+                  await api.del(`/categories/${categoryId}`);
+                },
+              })
+            }
+          >
+            <Trash2 size={16} /> Apagar
+          </Button>
+        </div>
+        <p className="text-xs text-fg-subtle">Dica: para mudar a ordem das categorias e dos canais, você também pode arrastar e soltar na barra lateral.</p>
+      </div>
     </Modal>
   );
 }
