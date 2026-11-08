@@ -1,6 +1,6 @@
 import { Check, Copy, Crosshair, Gift, ImagePlus, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
+import { CARD_FRAMES, FRAMES, MAX_PATCHES } from '../../../../shared/cosmetics.ts';
 import { api } from '../../lib/api';
 import type { Me, Member, Patch, Presence, ServerPatch, ServerSummary } from '../../lib/types';
 import { pickImage, prepareImage, uploadImage } from '../../lib/upload';
@@ -12,6 +12,7 @@ import { ServerPatchesPanel, equipPatch, newPatchDraft } from '../ServerPatches'
 import { Avatar, Button, cx } from '../ui';
 import { cardLook } from '../../lib/cardBg';
 import { MiniProfileBody } from '../MemberPopover';
+import { CARD_FRAME_LABELS, CardFrame } from '../CardFrame';
 import { PinterestButton, PinterestPicker } from '../PinterestPicker';
 
 const FRAME_NAMES: Record<string, string> = {
@@ -57,6 +58,14 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  async function setCardFrame(cardFrame: string | null) {
+    try {
+      setMe(await api.patch<Me>('/me/style', { cardFrame }));
+    } catch (err) {
+      toast.error(err);
+    }
+  }
+
   /**
    * Envia uma imagem (crop: proporção fixa, ou false para manter a imagem inteira). Sem `given`, abre o seletor de
    * arquivos; com ela (veio do Pinterest), envia direto e repassa o erro para a janela não fechar.
@@ -96,6 +105,21 @@ export function StyleTab({ embedded = false }: { embedded?: boolean }) {
           {FRAMES.map((f) => (
             <FrameOption key={f} label={FRAME_NAMES[f] ?? f} active={me.frame === f} onClick={() => void setFrame(f)}>
               <Avatar name={name} color={me.avatarColor} src={me.avatarUrl} frame={f} size={44} />
+            </FrameOption>
+          ))}
+        </div>
+      </section>
+
+      {/* moldura do mini perfil */}
+      <section>
+        <Title hint="Decoração em volta do seu mini perfil inteiro, por fora da borda.">Moldura do Mini-Perfil</Title>
+        <div className="flex flex-wrap gap-2">
+          <FrameOption label="Nenhuma" active={!me.cardFrame} onClick={() => void setCardFrame(null)}>
+            <MiniCardThumb me={me} frame={null} />
+          </FrameOption>
+          {CARD_FRAMES.map((f) => (
+            <FrameOption key={f} label={CARD_FRAME_LABELS[f] ?? f} active={me.cardFrame === f} onClick={() => void setCardFrame(f)}>
+              <MiniCardThumb me={me} frame={f} />
             </FrameOption>
           ))}
         </div>
@@ -389,6 +413,30 @@ function CombinedPositioner() {
   );
 }
 
+/** Cartãozinho de amostra (capa + foto + linhas) para escolher a moldura do mini perfil. */
+function MiniCardThumb({ me, frame }: { me: Me; frame: string | null }) {
+  const name = me.displayName || me.username;
+  const look = cardLook(me);
+  return (
+    <div className="relative m-2 h-[92px] w-[68px]">
+      <CardFrame frame={frame} scale={0.5} />
+      <div className="h-full w-full overflow-hidden rounded-[12px] bg-popover bg-cover bg-center ring-1 ring-line" style={look.style}>
+        {look.bannerUrl ? (
+          <img src={look.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" style={{ objectPosition: look.bannerPosition }} />
+        ) : (
+          <div className="h-[22px]" style={look.hasImage ? undefined : { background: me.bannerColor ?? me.avatarColor }} />
+        )}
+        <div className="-mt-3 px-1.5">
+          <Avatar name={name} color={me.avatarColor} src={me.avatarUrl} size={24} />
+          <div className="mt-1.5 h-1.5 w-10 rounded-full bg-fg/60" />
+          <div className="mt-1 h-1 w-7 rounded-full bg-fg/30" />
+          <div className="mt-2 h-1 w-12 rounded-full bg-fg/20" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FrameOption({ label, active, onClick, children }: { label: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -424,8 +472,12 @@ export function CardPreview({ me }: { me: Me }) {
   return (
     <div>
       <Title>Prévia</Title>
-      <div className="w-80 max-w-full overflow-hidden rounded-[24px] bg-popover bg-cover bg-center shadow-2xl ring-1 ring-line" style={look.style}>
-        <MiniProfileBody member={member} serverId={detail?.server.id ?? null} ownerId={detail?.server.ownerId ?? null} roles={roles} presence={status} presenceInfo={presence} />
+      {/* com moldura do mini perfil, sobra espaço em volta para ela aparecer inteira */}
+      <div className={cx('relative w-80', me.cardFrame ? 'm-4 max-w-[calc(100%-2rem)]' : 'max-w-full')}>
+        <CardFrame frame={me.cardFrame} />
+        <div className="overflow-hidden rounded-[24px] bg-popover bg-cover bg-center shadow-2xl ring-1 ring-line" style={look.style}>
+          <MiniProfileBody member={member} serverId={detail?.server.id ?? null} ownerId={detail?.server.ownerId ?? null} roles={roles} presence={status} presenceInfo={presence} />
+        </div>
       </div>
     </div>
   );

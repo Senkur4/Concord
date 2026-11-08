@@ -82,6 +82,7 @@ import {
   ART_OFFSET,
   ART_SCALE,
   FRAMES,
+  CARD_FRAMES,
   MAX_CUSTOM_STICKERS,
   MAX_PATCHES,
   MAX_PLACED_STICKERS,
@@ -89,6 +90,7 @@ import {
   PRESET_STICKERS,
   STICKER_FINISHES,
   type FrameId,
+  type CardFrameId,
   type Patch,
 } from '../../shared/cosmetics.ts';
 import {
@@ -139,6 +141,8 @@ type PublicUser = Pick<
 
 interface ProfileStyle {
   frame?: FrameId | null;
+  /** moldura do mini perfil: decoração em volta do cartão inteiro */
+  cardFrame?: CardFrameId | null;
   cardBg?: string | null;
   /** "Capa com Fundo de Mini-Perfil": uma imagem só no cartão inteiro (no lugar da capa e do fundo) */
   combinedBg?: string | null;
@@ -193,6 +197,7 @@ function parseStyle(raw: string | null | undefined): ProfileStyle {
 
 const styleJson = (st: ProfileStyle) => ({
   frame: st.frame && (FRAMES as readonly string[]).includes(st.frame) ? st.frame : null,
+  cardFrame: st.cardFrame && (CARD_FRAMES as readonly string[]).includes(st.cardFrame) ? st.cardFrame : null,
   cardBgUrl: st.cardBg ?? null,
   combinedBgUrl: st.combinedBg ?? null,
   combinedPos: cleanPos(st.combinedPos) ?? { x: 50, y: 30 },
@@ -1197,6 +1202,12 @@ api.patch('/me/style', (req, res) => {
     const frame = req.body.frame;
     if (frame !== null && !(FRAMES as readonly string[]).includes(frame)) fail(400, 'Moldura inválida');
     style.frame = frame;
+  }
+  if (req.body?.cardFrame !== undefined) {
+    const cardFrame = req.body.cardFrame;
+    if (cardFrame !== null && !(CARD_FRAMES as readonly string[]).includes(cardFrame)) fail(400, 'Moldura do mini perfil inválida');
+    style.cardFrame = cardFrame;
+    nameChanged = true; // aparece no mini perfil que os outros abrem
   }
   for (const key of ['combinedPos', 'bannerPos', 'cardBgPos'] as const) {
     if (req.body?.[key] === undefined) continue;

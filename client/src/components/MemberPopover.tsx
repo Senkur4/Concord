@@ -14,6 +14,7 @@ import { SupporterPatch } from './SupporterPatch';
 import { usePatchInspect } from '../store/patchInspect';
 import { cardLook } from '../lib/cardBg';
 import { ColoredName } from './ColoredName';
+import { CardFrame } from './CardFrame';
 
 export function MemberPopover() {
   const { userId, serverId, x, y, close } = usePopover();
@@ -106,14 +107,19 @@ export function MemberPopover() {
       // aberto passando o mouse: fica enquanto o mouse está no cartão
       onPointerEnter={keepPopoverOpen}
       onPointerLeave={releasePopover}
-      className="fixed z-40 max-h-[calc(100vh-16px)] w-80 animate-pop-in overflow-y-auto rounded-[24px] bg-popover bg-cover bg-center shadow-2xl ring-1 ring-line"
+      className="fixed z-40 w-80 animate-pop-in"
       style={{
         left: x,
         // abre na altura do clique, mas sobe o quanto precisar para caber inteiro na tela
         top: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
-        ...look.style,
       }}
     >
+      {/* moldura do mini perfil: fica por fora do cartão, então não pode estar dentro da parte que rola */}
+      <CardFrame frame={member.cardFrame} />
+      <div
+        className="max-h-[calc(100vh-16px)] overflow-y-auto rounded-[24px] bg-popover bg-cover bg-center shadow-2xl ring-1 ring-line"
+        style={look.style}
+      >
       <MiniProfileBody
         member={member}
         serverId={detail.server.id}
@@ -315,6 +321,7 @@ export function MemberPopover() {
             </div>
           )}
       </MiniProfileBody>
+      </div>
     </div>
   );
 }

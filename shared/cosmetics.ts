@@ -17,6 +17,10 @@ export const FRAMES = [
 ] as const;
 export type FrameId = (typeof FRAMES)[number];
 
+/** Molduras em volta do mini perfil inteiro (por fora da borda do cartão). */
+export const CARD_FRAMES = ['christmas'] as const;
+export type CardFrameId = (typeof CARD_FRAMES)[number];
+
 /** Patches "costurados" no cartão de perfil. */
 export const PATCH_SHAPES = ['circle', 'shield', 'rect', 'hex', 'star', 'banner'] as const;
 export type PatchShape = (typeof PATCH_SHAPES)[number];

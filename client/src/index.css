@@ -662,3 +662,22 @@ video::-webkit-media-controls {
 .gift-text-in { animation: gift-text 0.5s ease-out both; }
 @keyframes gift-text { from { opacity: 0; transform: translateY(10px); } }
 :root[data-motion='reduce'] :is(.gift-rays, .gift-text-in) { animation: none; }
+
+/* moldura do mini perfil "Natal": as luzinhas piscam cada uma no seu tempo */
+@keyframes xmas-twinkle {
+  0%, 100% { opacity: 1; }
+  45% { opacity: 1; }
+  60% { opacity: 0.35; }
+  75% { opacity: 1; }
+}
+@keyframes xmas-halo {
+  0%, 100% { opacity: 0.75; }
+  45% { opacity: 0.75; }
+  60% { opacity: 0.1; }
+  75% { opacity: 0.75; }
+}
+.xmas-bulb { animation: xmas-twinkle 2.6s ease-in-out infinite; }
+.xmas-glow { animation: xmas-halo 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .xmas-bulb, .xmas-glow { animation: none; }
+}
