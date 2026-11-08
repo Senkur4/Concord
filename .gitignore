@@ -7,3 +7,5 @@ data-dev/
 client/build-commit.txt
 *.tgz
 deploy/monitoring/prometheus.yml
+# filmes e vídeos do bot de filmes: nunca vão para o GitHub
+videos/
