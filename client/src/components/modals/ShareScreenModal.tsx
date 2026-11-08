@@ -201,8 +201,13 @@ function AudioOption({
   source: DesktopSource | null;
 }) {
   const [processAudio, setProcessAudio] = useState<boolean | null>(desktop ? null : false);
+  const [systemAudio, setSystemAudio] = useState(false);
   useEffect(() => {
-    if (desktop) void desktopInfo().then((i) => setProcessAudio(i.processAudio));
+    if (desktop)
+      void desktopInfo().then((i) => {
+        setProcessAudio(i.processAudio);
+        setSystemAudio(!!i.systemAudio);
+      });
   }, []);
 
   let title = 'Transmitir áudio';
@@ -215,10 +220,14 @@ function AudioOption({
       title = 'Transmitir o áudio do PC';
       hint = 'Todo o som do computador, menos as vozes da sala — quem assiste não ouve a própria voz de volta.';
     }
+  } else if (desktop && processAudio === false && systemAudio) {
+    title = 'Transmitir o áudio do PC (inteiro)';
+    hint =
+      'No Windows 10 não dá para separar o som por programa: vai todo o som do computador, inclusive as vozes da sala. Quem assiste pode ouvir a própria voz com atraso; se incomodar, abaixe o volume da transmissão no Concord.';
   } else if (desktop && processAudio === false) {
-    hint = 'A captura de áudio sem retorno precisa do Windows 11 (ou Windows 10 build 20348+). Neste sistema a transmissão vai sem áudio.';
+    hint = 'A captura de áudio sem retorno precisa do Windows 11 (ou Windows 10 build 20348+). Neste sistema a transmissão vai sem áudio. Atualize o app desktop para poder mandar o som do PC inteiro.';
   }
-  const disabled = !!desktop && processAudio === false;
+  const disabled = !!desktop && processAudio === false && !systemAudio;
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-0 p-3">

@@ -48,6 +48,21 @@ if (OLD_SERVERS.includes(config.server)) {
 }
 const serverOrigin = () => new URL(config.server).origin;
 
+// Servidor em http:// (sem o "s") que não é o próprio computador, como o de casa aberto pela Radmin VPN
+// (http://26.x.x.x:3000): o Chromium trata como inseguro e esconde o microfone, a câmera e a captura de tela.
+// Esta é a mesma liberação do "chrome://flags/#unsafely-treat-insecure-origin-as-secure", só para o endereço do
+// servidor configurado. Vale a partir da abertura do app (por isso trocar para outro servidor http reabre o app).
+function insecureServer(origin) {
+  try {
+    const u = new URL(origin);
+    return u.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  } catch {
+    return false;
+  }
+}
+const allowedInsecureOrigin = insecureServer(config.server) ? serverOrigin() : null;
+if (allowedInsecureOrigin) app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', allowedInsecureOrigin);
+
 // Links do Spotify (Jam, música, playlist...) abrem no app do Spotify quando ele está instalado: no navegador
 // cairiam no Spotify Web, e a Jam é para tocar no app. Sem o Spotify instalado, seguem para o navegador.
 const SPOTIFY_LINK = /^https:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(socialsession|track|album|playlist|artist|episode|show)\/([A-Za-z0-9]+)/;
@@ -217,16 +232,18 @@ function setupSession() {
 
   // A página escolhe a fonte no seletor do próprio Concord (concord:select-source) e
   // só depois chama getDisplayMedia; aqui entregamos exatamente a fonte escolhida.
-  // O áudio NÃO vai por aqui: ele vem do audio-capture.exe, sem as vozes da sala.
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+  // O áudio normalmente NÃO vai por aqui: ele vem do audio-capture.exe, sem as vozes da sala. No Windows 10
+  // (sem captura por programa), se a página pedir áudio, vai o som do PC inteiro ("loopback" do Windows).
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     const id = pendingSourceId;
     pendingSourceId = null;
     desktopCapturer
       .getSources({ types: ['screen', 'window'] })
       .then((sources) => {
         const source = sources.find((s) => s.id === id);
-        if (source) callback({ video: source });
-        else callback({});
+        if (!source) return callback({});
+        const systemAudio = request.audioRequested && process.platform === 'win32' && !processAudioSupported();
+        callback(systemAudio ? { video: source, audio: 'loopback' } : { video: source });
       })
       .catch(() => callback({}));
   });
@@ -281,6 +298,8 @@ handle('concord:info', () => ({
   platform: process.platform,
   version: app.getVersion(),
   processAudio: processAudioSupported(),
+  // sem captura por programa (Windows 10): dá para mandar o som do PC inteiro, com as vozes da sala junto
+  systemAudio: process.platform === 'win32' && !processAudioSupported(),
   server: config.server,
 }));
 
@@ -383,6 +402,12 @@ handle('concord:set-server', async (_e, url) => {
   }
   config.server = parsed.origin;
   saveConfig();
+  // servidor http novo: a liberação de microfone/tela só vale a partir da abertura do app
+  if (insecureServer(config.server) && config.server !== allowedInsecureOrigin) {
+    app.relaunch();
+    app.exit(0);
+    return;
+  }
   void win?.loadURL(config.server);
 });
 

@@ -19,6 +19,8 @@ export interface DesktopInfo {
   platform: string;
   version: string;
   processAudio: boolean;
+  /** Windows 10 (sem captura por programa): o app novo manda o som do PC inteiro (com as vozes da sala) */
+  systemAudio?: boolean;
   server: string;
 }
 

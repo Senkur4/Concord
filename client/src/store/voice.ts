@@ -851,6 +851,9 @@ export const useVoice = create<VoiceStore>((set, get) => {
       // No app desktop o áudio vem do capturador por processo (sem as vozes da sala),
       // então o getDisplayMedia pede só o vídeo da fonte escolhida no seletor do Concord.
       const desktopShare = !!desktop && !!sourceId;
+      // Windows 10 no app desktop: sem captura por programa, o áudio vem do som do PC inteiro (pedido junto da tela)
+      const desktopCaps = desktopShare ? await desktopInfo() : null;
+      const systemAudio = !!desktopCaps && !desktopCaps.processAudio && !!desktopCaps.systemAudio;
       let codec: VideoCodec = settings.codec === 'auto' ? AUTO_CODEC : settings.codec;
       // preferência salva de outro PC, ou a placa/driver mudou
       if (codec === 'h265' && !h265Support().encode) {
@@ -863,7 +866,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
         await lp.setScreenShareEnabled(
           true,
           {
-            audio: settings.audio && !desktopShare ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
+            audio: settings.audio && (!desktopShare || systemAudio) ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
             resolution: { width: preset.width, height: preset.height, frameRate: fps },
             contentHint: settings.mode === 'motion' ? 'motion' : 'detail',
             selfBrowserSurface: 'exclude',
@@ -879,7 +882,7 @@ export const useVoice = create<VoiceStore>((set, get) => {
         void warnIfSoftwareEncoding(lp.getTrackPublication(Track.Source.ScreenShare)?.track, preset.height > 720 || fps > 30);
         set({ focus: `${lp.identity}:screen` });
         bump();
-        if (desktopShare && settings.audio && (await desktopInfo()).processAudio) {
+        if (desktopShare && settings.audio && desktopCaps?.processAudio) {
           await startDesktopShareAudio(sourceId!);
         }
       } catch (err) {

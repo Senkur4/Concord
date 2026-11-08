@@ -17,6 +17,9 @@ jobs:
   build-win:
     name: Instalador Windows
     runs-on: windows-latest
+    env:
+      # forks não têm a chave de assinatura das atualizações automáticas: o instalador sai igual, só sem o .sig
+      HAS_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -52,9 +55,13 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       # cada build tem versão nova (1.0.<nº da execução>): é o que o atualizador compara
+      # num fork a contagem recomeça do 1: usa 1.1.x para a versão nova ficar acima da do app oficial (1.0.x)
       - name: Definir versão
         working-directory: desktop
-        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+        shell: bash
+        run: |
+          if [ "${{ github.repository }}" = "duarteHiago/concord" ]; then V="1.0.${{ github.run_number }}"; else V="1.1.${{ github.run_number }}"; fi
+          npm version "$V" --no-git-tag-version --allow-same-version
 
       - name: Gerar instalador
         working-directory: desktop
@@ -65,7 +72,7 @@ jobs:
       # os apps só instalam atualização com esta assinatura (ver desktop/update-signature.cjs). Em PR de fork o
       # segredo não existe: só monta o instalador, sem assinar (e PR nunca publica).
       - name: Assinar a atualização
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && env.HAS_UPDATE_KEY == 'true'
         working-directory: desktop
         env:
           DESKTOP_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY }}
@@ -96,6 +103,10 @@ jobs:
   build-mac:
     name: Instalador macOS
     runs-on: macos-latest
+    # o instalador de Mac só é montado no repositório original (num fork só precisa do Windows)
+    if: github.repository == 'duarteHiago/concord'
+    env:
+      HAS_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -118,7 +129,7 @@ jobs:
         run: npx electron-builder --mac --publish never
 
       - name: Assinar a atualização
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && env.HAS_UPDATE_KEY == 'true'
         working-directory: desktop
         env:
           DESKTOP_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY }}
