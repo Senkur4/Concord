@@ -714,8 +714,10 @@ export const useVoice = create<VoiceStore>((set, get) => {
         if (get().channelId !== channelId) return; // trocou de sala durante a conexão
 
         const room = new Room({
-          // não pausa o vídeo com a janela minimizada: a live pode estar aberta em outra janela
-          adaptiveStream: { pauseVideoInBackground: false },
+          // sem o "adaptiveStream" do LiveKit: nele o tamanho do quadro sempre manda na qualidade (240p num quadro
+          // pequeno, mesmo pedindo a melhor). O Concord pede a qualidade de cada vídeo (lib/viewQuality.ts): pelo
+          // tamanho do quadro no automático, ou a escolhida por quem assiste. Vídeo fora da tela é desligado.
+          adaptiveStream: false,
           dynacast: true,
           // mixa o áudio remoto por um GainNode (em vez do volume nativo do <audio>, que trava em 100%):
           // é isso que permite o volume por usuário passar de 100% (até 200%, como no Discord)

@@ -1,6 +1,7 @@
-import { Track, type LocalTrack, type Participant, type RemoteTrack } from 'livekit-client';
+import { Track, type LocalTrack, type Participant, type RemoteTrack, type TrackPublication } from 'livekit-client';
 import {
   Activity,
+  Check,
   ChevronDown,
   Users,
   Eye,
@@ -24,7 +25,7 @@ import {
   PictureInPicture2,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { P, has } from '../../../shared/permissions.ts';
 import { memberName, type Channel, type ServerDetail } from '../lib/types';
 import { useActiveDetail, useApp } from '../store/app';
@@ -40,6 +41,7 @@ import { ClipButton } from './Clip';
 import { JamButton } from './Jam';
 import { CodecRequests, H265Help, ShareCodecBadge } from './H265Help';
 import { isPoppedOut, popOutVideo } from '../lib/popout';
+import { streamLayers, useRemoteVideoQuality, useViewQuality, type ViewQuality } from '../lib/viewQuality';
 import { toast } from '../store/toast';
 import { onVisibilityChange } from '../lib/visibility';
 import { MobileBackButton } from './MobileNav';
@@ -468,7 +470,7 @@ function Bubble({ detail, tile }: { detail: ServerDetail; tile: TileInfo }) {
       className="flex shrink-0 flex-col items-center gap-1.5"
     >
       <span className={cx('relative block h-16 w-16 overflow-hidden rounded-full ring-4 transition-shadow', speaking && !muted ? 'ring-accent' : 'ring-surface-1')}>
-        {camTrack ? <VideoEl track={camTrack} fit="cover" mirror={tile.isLocal} /> : <Avatar name={name} color={color} src={avatarUrl} frame={frame} size={64} />}
+        {camTrack ? <VideoEl track={camTrack} pub={camPub} fit="cover" mirror={tile.isLocal} /> : <Avatar name={name} color={color} src={avatarUrl} frame={frame} size={64} />}
       </span>
       <span className="flex max-w-24 items-center gap-1 rounded-full bg-surface-1/85 px-2.5 py-0.5 text-xs font-bold backdrop-blur">
         {muted && <MicOff size={11} className="shrink-0 text-danger" />}
@@ -552,7 +554,7 @@ function Tile({
         {!isLocal && watching && blocked ? (
           <H265Help identity={p.identity} diagnosis={blocked} compact={!focused} onExpand={onClick} />
         ) : canView && track ? (
-          <ZoomableVideo track={track} />
+          <ZoomableVideo track={track} pub={pub} />
         ) : canView ? (
           <div className="flex h-full items-center justify-center">
             <Spinner />
@@ -590,6 +592,7 @@ function Tile({
         {canView && (
           <div className="absolute top-4 right-4 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100" onClick={(e) => e.stopPropagation()}>
             {!isLocal && <StreamVolume identity={p.identity} />}
+            {!isLocal && <StreamQualityMenu pub={pub} tileRef={ref} />}
             {track && (
               <OverlayButton
                 label="Abrir em outra janela (para outro monitor ou tela cheia)"
@@ -640,7 +643,7 @@ function Tile({
       className={cx('relative flex cursor-pointer items-center justify-center overflow-hidden bg-surface-2 transition-shadow', shape, speaking && !muted && 'ring-4 ring-accent')}
     >
       {camTrack ? (
-        <VideoEl track={camTrack} fit={focused ? 'contain' : 'cover'} mirror={isLocal} />
+        <VideoEl track={camTrack} pub={camPub} fit={focused ? 'contain' : 'cover'} mirror={isLocal} />
       ) : (
         <Avatar name={name} color={color} src={avatarUrl} frame={frame} size={focused ? 128 : 84} speaking={speaking && !muted} />
       )}
@@ -695,17 +698,113 @@ function StreamVolume({ identity }: { identity: string }) {
   );
 }
 
-function VideoEl({ track, fit, mirror }: { track: LocalTrack | RemoteTrack; fit: 'contain' | 'cover'; mirror?: boolean }) {
-  const ref = useRef<HTMLVideoElement>(null);
+function VideoEl({
+  track,
+  pub,
+  quality = 'auto',
+  fit,
+  mirror,
+}: {
+  track: LocalTrack | RemoteTrack;
+  /** publicação remota: o Concord pede a qualidade (ver lib/viewQuality.ts) */
+  pub?: TrackPublication;
+  quality?: ViewQuality;
+  fit: 'contain' | 'cover';
+  mirror?: boolean;
+}) {
+  const [el, setEl] = useState<HTMLVideoElement | null>(null);
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
     track.attach(el);
     return () => {
       track.detach(el);
     };
-  }, [track]);
-  return <video ref={ref} autoPlay playsInline muted className={cx('h-full w-full', fit === 'contain' ? 'object-contain' : 'object-cover', mirror && '-scale-x-100')} />;
+  }, [track, el]);
+  // a janela separada (pop-out) continua mostrando o vídeo mesmo com o quadro fora da tela
+  useRemoteVideoQuality(el, pub, quality, () => isPoppedOut(track));
+  return <video ref={setEl} autoPlay playsInline muted className={cx('h-full w-full', fit === 'contain' ? 'object-contain' : 'object-cover', mirror && '-scale-x-100')} />;
+}
+
+/** Qualidade da transmissão para quem assiste, como no YouTube. */
+function StreamQualityMenu({ pub, tileRef }: { pub?: TrackPublication; tileRef: RefObject<HTMLDivElement | null> }) {
+  const quality = useViewQuality((s) => s.quality);
+  const setQuality = useViewQuality((s) => s.setQuality);
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState<{ w: number; h: number } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const read = () => {
+      const v = tileRef.current?.querySelector('video');
+      setNow(v && v.videoWidth ? { w: v.videoWidth, h: v.videoHeight } : null);
+    };
+    read();
+    const t = setInterval(read, 1000);
+    const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', close);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('mousedown', close);
+    };
+  }, [open, tileRef]);
+
+  const layers = streamLayers(pub);
+  const options: { value: ViewQuality; label: string; hint?: string }[] = [
+    { value: 'auto', label: 'Automática', hint: 'muda com o tamanho do quadro e a internet' },
+    { value: 'source', label: layers[0] ? `Original · ${layers[0].height}p` : 'Original (a melhor)', hint: 'sempre a melhor que a pessoa transmite' },
+    ...layers.slice(1).map((l) => ({ value: l.height as ViewQuality, label: `${l.height}p` })),
+  ];
+  // a escolha salva pode ser uma camada que esta transmissão não tem: aparece mesmo assim
+  if (typeof quality === 'number' && !options.some((o) => o.value === quality)) options.push({ value: quality, label: `${quality}p`, hint: 'a mais perto disso' });
+  const badge = quality === 'auto' ? null : quality === 'source' ? (layers[0] ? `${layers[0].height}p` : 'Máx') : `${quality}p`;
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        title="Qualidade"
+        aria-label="Qualidade da transmissão"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={cx(
+          'flex h-10 min-w-10 items-center justify-center gap-1 rounded-full px-2.5 text-xs font-bold backdrop-blur transition-colors',
+          open || badge ? 'bg-accent text-on-accent' : 'bg-surface-1/80 text-fg hover:bg-surface-1',
+        )}
+      >
+        <Settings2 size={16} />
+        {badge}
+      </button>
+      {open && (
+        <div role="menu" className="absolute top-12 right-0 z-20 w-64 rounded-2xl bg-popover p-1.5 shadow-2xl ring-1 ring-line">
+          <p className="px-3 pt-1.5 pb-1 text-xs font-bold text-fg-subtle">Qualidade</p>
+          {options.map((o) => {
+            const on = quality === o.value;
+            return (
+              <button
+                key={String(o.value)}
+                role="menuitemradio"
+                aria-checked={on}
+                onClick={() => {
+                  setQuality(o.value);
+                  setOpen(false);
+                }}
+                className={cx('flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-surface-3', on && 'bg-accent/12')}
+              >
+                <span className="w-4 shrink-0 text-accent">{on && <Check size={15} />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">{o.label}</span>
+                  {o.hint && <span className="block text-[11px] text-fg-subtle">{o.hint}</span>}
+                </span>
+              </button>
+            );
+          })}
+          <p className="border-t border-line px-3 pt-2 pb-1.5 text-[11px] leading-snug text-fg-subtle">
+            {now ? `Recebendo agora: ${now.w}×${now.h}. ` : ''}Se a internet de quem transmite cair, a imagem pode baixar mesmo assim: aí é na origem.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------ estatísticas
@@ -923,7 +1022,8 @@ function ControlDock({ channel }: { channel: Channel }) {
 // ------------------------------------------------------------------ zoom na transmissão
 
 /** Vídeo da transmissão com zoom pela rolagem do mouse (no ponto do cursor) e arraste para mover. */
-function ZoomableVideo({ track }: { track: LocalTrack | RemoteTrack }) {
+function ZoomableVideo({ track, pub }: { track: LocalTrack | RemoteTrack; pub?: TrackPublication }) {
+  const quality = useViewQuality((s) => s.quality);
   const box = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
@@ -980,7 +1080,7 @@ function ZoomableVideo({ track }: { track: LocalTrack | RemoteTrack }) {
       onClick={(e) => zoomed && e.stopPropagation()}
     >
       <div className="h-full w-full" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: 'center' }}>
-        <VideoEl track={track} fit="contain" />
+        <VideoEl track={track} pub={pub} quality={quality} fit="contain" />
       </div>
       {zoomed && (
         <button
