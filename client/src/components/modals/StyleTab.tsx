@@ -28,6 +28,7 @@ const FRAME_NAMES: Record<string, string> = {
   glitch: 'Glitch',
   hearts: 'Corações',
   sakura: 'Sakura',
+  xmas: 'Natal',
 };
 
 

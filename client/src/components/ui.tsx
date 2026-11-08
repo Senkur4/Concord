@@ -110,6 +110,7 @@ const FRAME_PARTICLES: Record<string, string[]> = {
   sakura: ['🌸', '🌸', '🌸'],
   galaxy: ['✦', '✧', '✦', '✧'],
   fire: ['🔥', '🔥'],
+  xmas: ['❄', '❄', '❄', '❄', '❄'],
 };
 
 export function AvatarFrame({ frame, size }: { frame: string; size: number }) {

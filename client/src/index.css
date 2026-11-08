@@ -383,6 +383,26 @@ video::-webkit-media-controls {
   --frame-speed: 6s;
   --orbit-speed: 10s;
 }
+/* Natal: listras de bengala doce girando devagar, com flocos de neve em volta piscando */
+.frame-xmas {
+  --frame-bg: repeating-conic-gradient(#e8253b 0deg 18deg, #fff7f0 18deg 30deg, #1f9a4c 30deg 42deg, #fff7f0 42deg 54deg);
+  --frame-glow: #ff4b5c99;
+  --frame-speed: 9s;
+  --orbit-speed: 12s;
+}
+.frame-xmas .frame-particles b {
+  color: #fff;
+  text-shadow:
+    0 0 4px #fff,
+    0 0 8px #9fd8ff;
+  animation:
+    frame-bob 2.2s ease-in-out infinite,
+    frame-twinkle 1.4s ease-in-out infinite alternate;
+}
+.frame-xmas .frame-particles i:nth-child(even) b {
+  font-size: calc(var(--ps) * 0.7);
+  animation-delay: -0.7s;
+}
 @keyframes frame-spin {
   to {
     transform: rotate(360deg);
