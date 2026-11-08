@@ -26,7 +26,7 @@ async function upload(c: Awaited<ReturnType<typeof signUp>>, name: string, bytes
   const res = await fetch(`${c.base}/api/attachments?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${c.token}`, 'content-type': 'application/octet-stream' },
-    body: bytes,
+    body: new Uint8Array(bytes),
   });
   return (await res.json()) as { id: string; url: string };
 }

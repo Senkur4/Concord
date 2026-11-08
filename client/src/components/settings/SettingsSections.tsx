@@ -21,6 +21,7 @@ import { useApp } from '../../store/app';
 import { toast } from '../../store/toast';
 import { useVoice } from '../../store/voice';
 import { Avatar, Button, Input, Toggle, cx } from '../ui';
+import { NameColorEditor } from './NameColorEditor';
 
 const COLORS = ['#5865f2', '#7c5cff', '#3ba55c', '#1abc9c', '#00b0f4', '#faa61a', '#e67e22', '#ed4245', '#eb459e', '#9b59b6'];
 
@@ -64,8 +65,15 @@ export function MyProfile() {
   const [uploading, setUploading] = useState(false);
   const saveSettings = useApp((s) => s.saveSettings);
   const [customStatus, setCustomStatus] = useState(me.settings.customStatus ?? '');
+  const [nameColors, setNameColors] = useState<string[] | null>(me.nameColors ?? null);
+  const nameColorsChanged = JSON.stringify(nameColors) !== JSON.stringify(me.nameColors ?? null);
   const dirty =
-    name !== me.displayName || color !== me.avatarColor || banner !== me.bannerColor || bio !== me.bio || customStatus !== (me.settings.customStatus ?? '');
+    name !== me.displayName ||
+    color !== me.avatarColor ||
+    banner !== me.bannerColor ||
+    bio !== me.bio ||
+    customStatus !== (me.settings.customStatus ?? '') ||
+    nameColorsChanged;
 
   async function changeAvatar(given?: File) {
     const file = given ?? (await pickImage());
@@ -89,6 +97,7 @@ export function MyProfile() {
     setSaving(true);
     try {
       setMe(await api.patch<Me>('/me', { displayName: name, avatarColor: color, bannerColor: banner, bio }));
+      if (nameColorsChanged) setMe(await api.patch<Me>('/me/style', { nameColors }));
       if (customStatus !== (me.settings.customStatus ?? '')) await saveSettings({ customStatus: customStatus.trim() });
       toast.success('Perfil atualizado');
     } catch (err) {
@@ -128,6 +137,7 @@ export function MyProfile() {
             <Input label="Nome de exibição" value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
             <Input label="Status" value={customStatus} maxLength={80} placeholder="Ex.: volto às 22h" onChange={(e) => setCustomStatus(e.target.value)} />
           </div>
+          <NameColorEditor value={nameColors} onChange={setNameColors} name={name || me.username} />
           <label className="block">
             <span className="mb-1.5 flex justify-between text-xs font-bold text-fg-muted">
               Sobre mim <span className="font-normal text-fg-subtle tabular-nums">{bio.length}/190</span>
@@ -180,7 +190,7 @@ export function MyProfile() {
       {/* prévia ao vivo: o mini perfil com o que está sendo editado, antes de salvar */}
       <aside className="hidden xl:block">
         <div className="sticky top-0 space-y-2">
-          <CardPreview me={{ ...me, displayName: name, avatarColor: color, bannerColor: banner, bio, settings: { ...me.settings, customStatus } }} />
+          <CardPreview me={{ ...me, displayName: name, avatarColor: color, bannerColor: banner, bio, nameColors, settings: { ...me.settings, customStatus } }} />
           <p className="text-xs text-fg-subtle">Muda enquanto você edita. Salve para valer.</p>
         </div>
       </aside>

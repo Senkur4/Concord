@@ -4,6 +4,7 @@ import { memberName, type Activity, type Member, type Presence, type ServerDetai
 import { memberColor, useActiveDetail, useApp } from '../store/app';
 import { profileTriggers } from '../store/popover';
 import { Avatar, VerifiedBadge, cx } from './ui';
+import { ColoredName } from './ColoredName';
 
 /** Painel lateral com a lista de membros (canais de texto). */
 export function MemberList() {
@@ -91,9 +92,9 @@ function MemberRow({ detail, member, presence }: { detail: ServerDetail; member:
       <Avatar name={memberName(member)} color={member.avatarColor} src={member.avatarUrl} frame={member.frame} size={34} status={presence?.status ?? 'offline'} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
-          <span className="truncate text-sm font-semibold" style={{ color: memberColor(detail, member.id) }}>
+          <ColoredName colors={member.nameColors} fallback={memberColor(detail, member.id)} className="truncate text-sm font-semibold">
             {memberName(member)}
-          </span>
+          </ColoredName>
           {member.verified && <VerifiedBadge size={13} />}
           {member.bot && <span className="shrink-0 rounded bg-accent-2/20 px-1 text-[9px] leading-4 font-bold text-accent-2">BOT</span>}
           {detail.server.ownerId === member.id && <Crown size={13} className="shrink-0 text-warn" />}

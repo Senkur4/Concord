@@ -34,6 +34,7 @@ import { ServerStrip } from './ServerRail';
 import { DeviceSplitButton } from './DeviceMenu';
 import { useMobile } from '../lib/mobile';
 import { Avatar, AvatarStack, IconButton, LivePill, VerifiedBadge, cx } from './ui';
+import { ColoredName } from './ColoredName';
 
 export function ChannelSidebar() {
   const detail = useActiveDetail();
@@ -578,9 +579,9 @@ function VoiceParticipant({ detail, state, speaking }: { detail: ServerDetail; s
       className="flex h-9 w-full items-center gap-2.5 rounded-xl px-1.5 text-left text-sm text-fg-muted hover:bg-surface-4 hover:text-fg"
     >
       <Avatar name={memberName(member)} color={member.avatarColor} src={member.avatarUrl} frame={member.frame} size={26} speaking={speaking && !state.muted} />
-      <span className="flex-1 truncate font-semibold" style={{ color: memberColor(detail, member.id) }}>
+      <ColoredName colors={member.nameColors} fallback={memberColor(detail, member.id)} className="flex-1 truncate font-semibold">
         {memberName(member)}
-      </span>
+      </ColoredName>
       {state.streaming && <MonitorUp size={14} className="text-accent" aria-label="transmitindo" />}
       {state.camera && <Video size={14} className="text-fg-subtle" aria-label="câmera ligada" />}
       {/* mutado e ensurdecido são independentes: quem está com os dois mostra os dois ícones */}
@@ -720,7 +721,9 @@ function UserCard() {
       >
         <div className="min-w-0 leading-tight">
           {/* nome comprido diminui um pouco antes de precisar cortar */}
-          <div className={cx('truncate font-bold', me.displayName.length > 11 ? 'text-[13px]' : 'text-sm')}>{me.displayName}</div>
+          <ColoredName colors={me.nameColors} className={cx('block truncate font-bold', me.displayName.length > 11 ? 'text-[13px]' : 'text-sm')}>
+            {me.displayName}
+          </ColoredName>
           <div className={cx('truncate text-xs', presence === 'dnd' ? 'text-danger' : 'text-fg-muted')}>
             {presence === 'dnd' ? 'Não perturbe' : `@${me.username}`}
           </div>

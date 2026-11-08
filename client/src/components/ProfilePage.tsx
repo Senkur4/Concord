@@ -15,6 +15,7 @@ import { toast } from '../store/toast';
 import { PATCH_TILTS, PatchBadge } from './PatchBadge';
 import { SupporterPatch } from './SupporterPatch';
 import { Avatar, Button, IconButton, ImageHint, Spinner, VerifiedBadge, cx, initials } from './ui';
+import { ColoredName } from './ColoredName';
 
 type Showcase = 'playing' | 'steam' | 'patches' | 'servers';
 const SECTIONS: { id: Showcase; label: string }[] = [
@@ -324,7 +325,9 @@ function Hero({
             </span>
           )}
           <h1 className="flex flex-wrap items-center gap-3 font-display text-5xl leading-none font-extrabold tracking-tight md:text-6xl">
-            <span className="truncate">{user.displayName}</span>
+            <ColoredName colors={user.nameColors} className="truncate">
+              {user.displayName}
+            </ColoredName>
             {user.verified && <VerifiedBadge size={28} />}
             {user.mecenas && <span className="rounded-full bg-warn/15 px-3 text-xs leading-7 font-extrabold tracking-widest text-warn">MECENAS</span>}
           </h1>

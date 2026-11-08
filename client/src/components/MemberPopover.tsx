@@ -13,6 +13,7 @@ import { PATCH_TILTS, PatchBadge } from './PatchBadge';
 import { SupporterPatch } from './SupporterPatch';
 import { usePatchInspect } from '../store/patchInspect';
 import { cardLook } from '../lib/cardBg';
+import { ColoredName } from './ColoredName';
 
 export function MemberPopover() {
   const { userId, serverId, x, y, close } = usePopover();
@@ -437,7 +438,9 @@ export function MiniProfileBody({
         </div>
         <div className={cx('rounded-2xl p-3', look.hasImage ? 'bg-surface-0/80 backdrop-blur-md' : 'bg-surface-0')}>
           <div className="flex items-center gap-1.5 text-lg font-bold">
-            <span className="truncate">{name}</span>
+            <ColoredName colors={member.nameColors} className="truncate">
+              {name}
+            </ColoredName>
             {member.verified && <VerifiedBadge size={16} />}
             {member.mecenas && (
               <span title="Mecenas do Concord" className="flex shrink-0 items-center gap-1 rounded-full bg-warn/15 px-2 text-[10px] leading-5 font-extrabold tracking-wide text-warn">

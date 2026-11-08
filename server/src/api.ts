@@ -144,6 +144,8 @@ interface ProfileStyle {
   /** ponto da imagem combinada que fica à mostra, em % (0 a 100) */
   combinedPos?: { x: number; y: number };
   patches?: Patch[];
+  /** cor do nome: 1 cor (sólida) ou 2 a 3 (degradê do começo ao fim), em #rrggbb */
+  nameColors?: string[] | null;
   /** página do perfil (aberta ao clicar em alguém): fundo, escurecimento, cor, colunas e vitrines */
   page?: ProfilePage;
 }
@@ -191,7 +193,15 @@ const styleJson = (st: ProfileStyle) => ({
   combinedBgUrl: st.combinedBg ?? null,
   combinedPos: cleanPos(st.combinedPos) ?? { x: 50, y: 30 },
   patches: Array.isArray(st.patches) ? st.patches : [],
+  nameColors: cleanNameColors(st.nameColors),
 });
+
+/** 1 a 3 cores #rrggbb (minúsculas), ou null. */
+function cleanNameColors(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 3) return null;
+  if (!raw.every((c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c))) return null;
+  return (raw as string[]).map((c) => c.toLowerCase());
+}
 
 /** Posição da imagem combinada (em %), ou null se inválida. */
 function cleanPos(raw: unknown): { x: number; y: number } | null {
@@ -1177,6 +1187,13 @@ api.patch('/me/style', (req, res) => {
     if (!pos) fail(400, 'Posição inválida');
     style.combinedPos = pos!;
   }
+  let nameChanged = false;
+  if (req.body?.nameColors !== undefined) {
+    const colors = req.body.nameColors === null ? null : cleanNameColors(req.body.nameColors);
+    if (req.body.nameColors !== null && !colors) fail(400, 'Cor do nome inválida (use de 1 a 3 cores no formato #rrggbb)');
+    style.nameColors = colors;
+    nameChanged = true;
+  }
   if (req.body?.patches !== undefined) {
     const next = cleanPatches(req.body.patches, me);
     dropped = (style.patches ?? []).filter((old) => old.image && !next.some((p) => p.image === old.image));
@@ -1184,6 +1201,7 @@ api.patch('/me/style', (req, res) => {
   }
   saveStyle(me, style);
   dropped.forEach((p) => dropPatchImage(p.image));
+  if (nameChanged) profileChanged(me); // quem está vendo o nome vê a cor nova na hora
   res.json(meJson(get<UserRow>('SELECT * FROM users WHERE id = ?', me)!));
 });
 

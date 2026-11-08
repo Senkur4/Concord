@@ -18,6 +18,8 @@ export interface User {
   verified?: boolean;
   /** moldura animada da foto */
   frame?: string | null;
+  /** cor do nome escolhida pela pessoa: 1 cor, ou 2 a 3 (degradê) */
+  nameColors?: string[] | null;
   /** fundo do mini perfil (imagem/GIF) */
   cardBgUrl?: string | null;
   /** "Capa com Fundo de Mini-Perfil": uma imagem só no cartão inteiro (vale no lugar da capa e do fundo) */

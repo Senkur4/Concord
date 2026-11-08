@@ -20,6 +20,7 @@ import { JamCard, useJamInMessage } from './Jam';
 import { ReplyBar, ReplyQuote, startReply } from './Replies';
 import { CopyTextButton, ForwardButton, ForwardedTag, canForward, forwardedOf } from './Forward';
 import { MobileBackButton } from './MobileNav';
+import { ColoredName } from './ColoredName';
 
 const EMPTY: Message[] = [];
 
@@ -244,9 +245,10 @@ function Bubble({
           <div className={cx('flex items-baseline gap-2 px-1 leading-tight', compact ? 'mb-1' : 'mb-1.5')}>
             <span
               className={cx('flex items-center gap-1 font-semibold', compact ? 'text-[15px]' : 'text-base')}
-              style={{ color: memberColor(detail, message.author.id) }}
             >
-              {name}
+              <ColoredName colors={detail.members.find((m) => m.id === message.author.id)?.nameColors ?? message.author.nameColors} fallback={memberColor(detail, message.author.id)}>
+                {name}
+              </ColoredName>
               {verified && <VerifiedBadge size={compact ? 14 : 15} />}
             </span>
             <span className="text-xs text-fg-subtle">{time}</span>
