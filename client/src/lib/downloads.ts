@@ -64,14 +64,22 @@ function speedometer() {
 // ---------- 1. app desktop ----------
 
 const desktopUrls = new Map<string, string>(); // id do app -> endereço
+// avisos que chegaram antes de o app dizer o id (arquivo pequeno termina antes disso): aplicados assim que ele chega
+const early = new Map<string, DesktopDownloadProgress>();
 let desktopHooked = false;
+let applyDesktop: (p: DesktopDownloadProgress) => void = () => {};
 function hookDesktop() {
   if (desktopHooked || !desktop?.onDownloadProgress) return;
   desktopHooked = true;
   const meters = new Map<string, ReturnType<typeof speedometer>>();
-  desktop.onDownloadProgress((p: DesktopDownloadProgress) => {
+  applyDesktop = (p: DesktopDownloadProgress) => {
     const url = desktopUrls.get(p.id);
-    if (!url) return;
+    if (!url) {
+      const prev = early.get(p.id);
+      // o último aviso vale, mas "terminou/falhou" não é trocado por um "baixando" atrasado
+      if (!prev || prev.state === 'progressing') early.set(p.id, p);
+      return;
+    }
     if (!meters.has(p.id)) meters.set(p.id, speedometer());
     const cur = states.get(url);
     const total = p.total || cur?.total || 0;
@@ -80,7 +88,8 @@ function hookDesktop() {
     else if (p.state === 'cancelled') set(url, null);
     else set(url, { status: 'failed', received: p.received, total, speed: 0, error: 'A conexão caiu no meio do download.', desktopId: p.id, fileName: p.fileName });
     if (p.state !== 'progressing') meters.delete(p.id);
-  });
+  };
+  desktop.onDownloadProgress((p) => applyDesktop(p));
 }
 
 // ---------- 2. navegador gravando direto no disco ----------
@@ -88,6 +97,7 @@ function hookDesktop() {
 interface Job {
   handle: FileSystemFileHandle;
   abort: AbortController;
+  name: string;
 }
 const jobs = new Map<string, Job>();
 
@@ -98,7 +108,15 @@ async function streamToDisk(url: string, job: Job, from: number, total: number) 
   const meter = speedometer();
   let received = from;
   set(url, { status: 'downloading', received, total, speed: 0 });
-  const writable = await job.handle.createWritable({ keepExistingData: from > 0 });
+  let writable: FileSystemWritableFileStream;
+  try {
+    writable = await job.handle.createWritable({ keepExistingData: from > 0 });
+  } catch {
+    // não deixou gravar no disco (o app desktop antigo bloqueia isso): vai pelo download comum
+    jobs.delete(url);
+    set(url, null);
+    return void plainDownload(url, job.name);
+  }
   try {
     const res = await fetch(url, { signal: job.abort.signal, headers: from > 0 ? { range: `bytes=${from}-` } : undefined });
     if (!res.ok || !res.body) throw new Error(`O servidor respondeu ${res.status}`);
@@ -154,7 +172,7 @@ function plainDownload(url: string, name: string) {
 // ---------- o que os botões chamam ----------
 
 /** true = este navegador/app mostra o progresso aqui; false = vai pelo download comum do navegador */
-export const canTrackDownloads = () => !!desktop?.downloadStart || !!savePicker();
+export const canTrackDownloads = () => (desktop ? !!desktop.downloadStart : !!savePicker());
 
 export async function startDownload(url: string, name: string, size: number) {
   const cur = states.get(url);
@@ -165,12 +183,17 @@ export async function startDownload(url: string, name: string, size: number) {
     try {
       const id = await desktop.downloadStart(new URL(url, location.href).toString(), name);
       desktopUrls.set(id, url);
+      const pending = early.get(id);
+      if (pending) {
+        early.delete(id);
+        applyDesktop(pending);
+      }
     } catch (err) {
       set(url, { status: 'failed', received: 0, total: size, speed: 0, error: err instanceof Error ? err.message : 'Não deu para baixar' });
     }
     return;
   }
-  const picker = savePicker();
+  const picker = desktop ? undefined : savePicker();
   if (!picker) return plainDownload(url, name);
   let handle: FileSystemFileHandle;
   try {
@@ -180,7 +203,7 @@ export async function startDownload(url: string, name: string, size: number) {
     if ((err as DOMException)?.name !== 'AbortError') plainDownload(url, name);
     return;
   }
-  const job: Job = { handle, abort: new AbortController() };
+  const job: Job = { handle, abort: new AbortController(), name };
   jobs.set(url, job);
   await streamToDisk(url, job, 0, size);
 }
