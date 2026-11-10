@@ -1,5 +1,6 @@
 // Sala de cinema: canal, biblioteca da pasta, arquivo com chave assinada, pedaços (Range) e limite de banda.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,5 +96,57 @@ describe('sala de cinema', () => {
     assert.ok(body.equals(movie));
     // 600 KB a 100 KB/s, com 1 s de folga no começo: uns 5 s (sem limite seria instantâneo)
     assert.ok(secs > 3.5, `foi rápido demais: ${secs.toFixed(1)} s`);
+  });
+});
+
+// precisa do ffmpeg na máquina dos testes; sem ele, pula
+const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
+
+describe('sala de cinema: troca de faixa de áudio', { skip: !hasFfmpeg && 'sem ffmpeg nesta máquina' }, () => {
+  it('lê as faixas, prepara (vídeo copiado + cada áudio separado) e entrega em pedaços', async () => {
+    spawnSync('ffmpeg', [
+      '-y', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=24:duration=14',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=14',
+      '-f', 'lavfi', '-i', 'sine=frequency=880:duration=14',
+      '-map', '0', '-map', '1', '-map', '2',
+      '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-cpu-used', '8', '-g', '24',
+      '-c:a:0', 'libopus', '-c:a:1', 'ac3',
+      '-metadata:s:a:0', 'language=por', '-metadata:s:a:1', 'language=eng', '-metadata:s:a:1', 'title=Original',
+      join(dir, 'Dublado.mkv'),
+    ]);
+    const { dono, channelId } = await cinemaRoom();
+    const lib = (await dono.get(`/channels/${channelId}/cinema?refresh=1`)).body;
+    const film = lib.films.find((f: { name: string }) => f.name === 'Dublado');
+    assert.deepEqual(film.audio, [
+      { label: 'Português', codec: 'opus' },
+      { label: 'Original', codec: 'ac3' },
+    ]);
+    assert.equal(film.needsPrep, true);
+    assert.equal(film.prep, null);
+    // filme comum (uma faixa que o navegador toca) não precisa de preparo
+    assert.equal(lib.films.find((f: { name: string }) => f.name === 'Filme A').needsPrep, false);
+
+    assert.equal((await dono.post(`/channels/${channelId}/cinema/films/${film.id}/prepare`)).status, 200);
+    let prep = null;
+    for (let i = 0; i < 100 && prep?.state !== 'ready'; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      prep = (await dono.get(`/channels/${channelId}/cinema`)).body.films.find((f: { id: string }) => f.id === film.id).prep;
+      assert.notEqual(prep?.state, 'failed');
+    }
+    assert.equal(prep?.state, 'ready');
+
+    const base = `${server.url}/api/cinema/hls/${lib.key}/${film.id}`;
+    const master = await (await fetch(`${base}/master.m3u8`)).text();
+    assert.equal((master.match(/TYPE=AUDIO/g) ?? []).length, 2);
+    assert.match(master, /NAME="Português",LANGUAGE="por",DEFAULT=YES/);
+    assert.match(master, /NAME="Original",LANGUAGE="eng",DEFAULT=NO/);
+    const audio1 = await (await fetch(`${base}/a1.m3u8`)).text();
+    assert.match(audio1, /#EXT-X-MAP:URI="a1_init.mp4"/);
+    const seg = await fetch(`${base}/v_00000.m4s`);
+    assert.equal(seg.status, 200);
+    assert.ok((await seg.arrayBuffer()).byteLength > 1000);
+    assert.equal((await fetch(`${base}/..%2F..%2Fconcord.db`)).status, 404);
+    assert.equal((await fetch(`${server.url}/api/cinema/hls/chave-falsa/${film.id}/master.m3u8`)).status, 403);
   });
 });

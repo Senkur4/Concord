@@ -29,6 +29,8 @@ COPY --from=client /app/client/dist ./client/dist
 WORKDIR /app/server
 # O servidor roda sem root (usuário "node", uid 1000). Ele usa a rede do host, que pode ter outros serviços:
 # uma falha no app não vira controle da máquina. Tudo o que ele grava fica em /data.
+# ffmpeg/ffprobe: a sala de cinema lê as faixas de áudio dos filmes e prepara a troca de áudio (ver cinemaPrep.ts)
+RUN apk add --no-cache ffmpeg
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data

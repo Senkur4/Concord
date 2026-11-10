@@ -269,7 +269,7 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer, sync }: { 
         ref={videoRef}
         preload={sync ? 'auto' : 'metadata'}
         playsInline
-        src={sync ? src : `${src}#t=0.1`}
+        src={sync ? src || undefined : `${src}#t=0.1`}
         onClick={() => {
           toggle();
           setMenu(null);
@@ -587,7 +587,7 @@ function MenuBack({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function MenuOption({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+export function MenuOption({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" role="menuitemradio" aria-checked={selected} onClick={onClick} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-white/10">
       <span className="w-4 shrink-0">{selected && <Check size={15} />}</span>

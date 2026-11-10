@@ -12,13 +12,14 @@ import { createReadStream, readdirSync, statSync, type Stats } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { Router } from 'express';
+import type { Request, Response, Router } from 'express';
 import type { Server, Socket } from 'socket.io';
 import { P, has } from '../../shared/permissions.ts';
 import { channelPermissions, getChannel, requireChannelPerm } from './access.ts';
 import { config } from './config.ts';
 import type { ChannelRow } from './db.ts';
 import { fail, uid } from './http.ts';
+import { needsPrep, onPrepChange, prepFile, prepStatus, probe, requestPrep, type PrepFilm } from './cinemaPrep.ts';
 
 const VIDEO_EXTS = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.mov']);
 const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/webm' };
@@ -87,6 +88,38 @@ export function library(force = false): Film[] {
 }
 
 const findFilm = (id: string) => library().find((f) => f.id === id) ?? library(true).find((f) => f.id === id);
+const prepFilm = (f: Film): PrepFilm => ({ id: f.id, path: join(cinemaDir(), f.file), size: f.size });
+
+/** O que a biblioteca mostra de cada filme: faixas de áudio e se já está preparado para a troca de áudio. */
+async function filmJson(f: Film) {
+  const p = await probe(prepFilm(f));
+  return {
+    id: f.id,
+    name: f.name,
+    file: f.file,
+    size: f.size,
+    ext: f.ext,
+    duration: p?.duration ?? 0,
+    audio: (p?.audio ?? []).map((a) => ({ label: a.label, codec: a.codec })),
+    needsPrep: needsPrep(p),
+    prep: prepStatus(prepFilm(f)),
+  };
+}
+
+/** ffprobe em até 4 arquivos por vez (o resultado fica guardado; só arquivo novo ou trocado é lido de novo) */
+async function filmsJson(films: Film[]) {
+  const out: Awaited<ReturnType<typeof filmJson>>[] = new Array(films.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, films.length) }, async () => {
+      while (next < films.length) {
+        const i = next++;
+        out[i] = await filmJson(films[i]);
+      }
+    }),
+  );
+  return out;
+}
 
 // ---------- chave para o <video> (ele não manda o token de login) ----------
 
@@ -128,19 +161,13 @@ class Throttle extends Transform {
   }
 }
 
-/** Antes do requireAuth: o <video> não manda o login, então vem com uma chave assinada (?k=). */
-export function registerCinemaPublicRoutes(api: Router) {
-  api.get('/cinema/file/:id', async (req, res) => {
-    const userId = checkKey(req.query.k);
-    if (!userId) return void res.status(403).json({ error: 'Chave do cinema inválida ou vencida. Recarregue a sala.' });
-    const film = findFilm(req.params.id);
-    if (!film) return void res.status(404).json({ error: 'Esse filme não está mais na pasta.' });
-    const path = join(cinemaDir(), film.file);
+/** Manda um arquivo (inteiro ou o pedaço pedido pelo Range), dentro do limite de banda. */
+async function sendFile(req: Request, res: Response, path: string, type: string, cacheControl: string) {
     let size: number;
     try {
       size = statSync(path).size;
     } catch {
-      return void res.status(404).json({ error: 'Esse filme não está mais na pasta.' });
+      return void res.status(404).json({ error: 'Esse arquivo não está mais lá.' });
     }
     let start = 0;
     let end = size - 1;
@@ -159,9 +186,9 @@ export function registerCinemaPublicRoutes(api: Router) {
       res.status(206).setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
     }
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Content-Type', MIME[`.${film.ext}`] ?? 'application/octet-stream');
+    res.setHeader('Content-Type', type);
     res.setHeader('Content-Length', String(end - start + 1));
-    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Cache-Control', cacheControl);
     if (req.method === 'HEAD') return void res.end();
     streams++;
     try {
@@ -171,6 +198,29 @@ export function registerCinemaPublicRoutes(api: Router) {
     } finally {
       streams--;
     }
+}
+
+const PREP_MIME: Record<string, string> = { m3u8: 'application/vnd.apple.mpegurl', m4s: 'video/iso.segment', mp4: 'video/mp4' };
+
+/** Antes do requireAuth: o <video> não manda o login, então vem com uma chave assinada. */
+export function registerCinemaPublicRoutes(api: Router) {
+  // o arquivo original (?k=chave)
+  api.get('/cinema/file/:id', async (req, res) => {
+    if (!checkKey(req.query.k)) return void res.status(403).json({ error: 'Chave do cinema inválida ou vencida. Recarregue a sala.' });
+    const film = findFilm(req.params.id);
+    if (!film) return void res.status(404).json({ error: 'Esse filme não está mais na pasta.' });
+    await sendFile(req, res, join(cinemaDir(), film.file), MIME[`.${film.ext}`] ?? 'application/octet-stream', 'private, no-store');
+  });
+
+  // a versão preparada (troca de áudio). A chave vai no caminho: as playlists apontam para os pedaços com
+  // endereços relativos, que herdam o caminho mas não o "?k=".
+  api.get('/cinema/hls/:key/:id/:file', async (req, res) => {
+    if (!checkKey(req.params.key)) return void res.status(403).json({ error: 'Chave do cinema inválida ou vencida. Recarregue a sala.' });
+    const film = findFilm(req.params.id);
+    const path = film && prepFile(prepFilm(film), req.params.file);
+    if (!path) return void res.status(404).json({ error: 'Esse pedaço do filme não existe.' });
+    const ext = req.params.file.split('.').pop()!;
+    await sendFile(req, res, path, PREP_MIME[ext], ext === 'm3u8' ? 'private, no-cache' : 'private, max-age=86400, immutable');
   });
 }
 
@@ -256,6 +306,11 @@ function resumeIfReady(r: Room) {
   }
 }
 
+// progresso do preparo: vai para todas as salas de cinema abertas
+onPrepChange((fileId, status) => {
+  for (const [channelId, r] of rooms) if (r.viewers.size) io?.to(`cinema:${channelId}`).emit('cinema:prep', { fileId, ...status });
+});
+
 /** Chamado para cada conexão (em setupRealtime). */
 export function registerCinemaSocket(server: Server, socket: Socket, userId: string) {
   io = server;
@@ -301,6 +356,8 @@ export function registerCinemaSocket(server: Server, socket: Socket, userId: str
         const film = typeof data.fileId === 'string' ? findFilm(data.fileId) : undefined;
         if (!film) return;
         Object.assign(r, { fileId: film.id, name: film.name, duration: 0 });
+        // tem mais de uma faixa de áudio (ou um áudio que o navegador não toca): prepara para a troca de áudio
+        void requestPrep(prepFilm(film));
         r.waiting.clear();
         r.pausedForWaiting = false;
         setPlaying(r, false, 0);
@@ -376,15 +433,23 @@ export function registerCinemaSocket(server: Server, socket: Socket, userId: str
 
 /** Biblioteca e estado, para quem abre a sala (com a chave dos arquivos). */
 export function registerCinemaRoutes(api: Router) {
-  api.get('/channels/:id/cinema', (req, res) => {
+  api.get('/channels/:id/cinema', async (req, res) => {
     const channel = requireChannelPerm(req.params.id, uid(res), P.VIEW_CHANNEL);
     if (!isCinema(channel)) fail(400, 'Este canal não é uma sala de cinema');
     res.json({
       configured: !!cinemaDir(),
-      films: library(req.query.refresh === '1').map(({ id, name, file, size, ext }) => ({ id, name, file, size, ext })),
+      films: await filmsJson(library(req.query.refresh === '1')),
       key: fileKey(uid(res)),
       state: cinemaState(channel.id),
     });
+  });
+
+  // preparar antes da sessão (para ninguém esperar na hora): o botão "Preparar" da biblioteca
+  api.post('/channels/:id/cinema/films/:filmId/prepare', async (req, res) => {
+    const channel = requireChannelPerm(req.params.id, uid(res), P.VIEW_CHANNEL);
+    if (!isCinema(channel)) fail(400, 'Este canal não é uma sala de cinema');
+    const film = findFilm(req.params.filmId) ?? fail(404, 'Esse filme não está mais na pasta.');
+    res.json({ prep: await requestPrep(prepFilm(film)) });
   });
 }
 

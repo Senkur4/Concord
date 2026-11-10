@@ -1,4 +1,5 @@
-import { Clapperboard, Film, FolderOpen, HardDrive, ListVideo, RefreshCw, Server, TriangleAlert } from 'lucide-react';
+import { AudioLines, Clapperboard, Film, FolderOpen, HardDrive, ListVideo, RefreshCw, Server, TriangleAlert, Wand2 } from 'lucide-react';
+import type Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
@@ -6,7 +7,7 @@ import { memberName, type Channel, type ServerDetail } from '../lib/types';
 import { useApp } from '../store/app';
 import { toast } from '../store/toast';
 import { AvatarStack, Spinner, cx } from './ui';
-import { VideoPlayer, type PlayerSync } from './VideoPlayer';
+import { MenuOption, VideoPlayer, type PlayerSync } from './VideoPlayer';
 
 /**
  * Tela da sala de cinema. Ninguém transmite: cada um toca o arquivo (do servidor ou do próprio PC) e o servidor só
@@ -14,13 +15,35 @@ import { VideoPlayer, type PlayerSync } from './VideoPlayer';
  * pulos grandes viram um pulo, diferenças pequenas são corrigidas acelerando ou freando o vídeo de leve (até 5%).
  */
 
+interface PrepInfo {
+  state: 'queued' | 'running' | 'ready' | 'failed';
+  progress: number;
+  error?: string;
+}
+
 interface FilmInfo {
   id: string;
   name: string;
   file: string;
   size: number;
   ext: string;
+  duration: number;
+  /** faixas de áudio do arquivo */
+  audio: { label: string; codec: string }[];
+  /** mais de uma faixa (ou áudio que o navegador não toca): toca a versão preparada, com troca de áudio */
+  needsPrep: boolean;
+  prep: PrepInfo | null;
 }
+
+/** a faixa de áudio que a pessoa escolheu por último (por idioma/nome): vale para os próximos filmes */
+const AUDIO_PREF_KEY = 'concord.cinemaAudio';
+const readAudioPref = () => {
+  try {
+    return localStorage.getItem(AUDIO_PREF_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
 
 interface CinemaState {
   channelId: string;
@@ -64,6 +87,9 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
   const [broken, setBroken] = useState(false);
   const [durationWarn, setDurationWarn] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [tracks, setTracks] = useState<{ id: number; name: string; lang: string }[]>([]);
+  const [track, setTrack] = useState(-1);
+  const hls = useRef<Hls | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const stateRef = useRef<CinemaState | null>(null);
   const offset = useRef(0); // relógio do servidor - relógio daqui
@@ -148,11 +174,16 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
       });
       void syncClock();
     };
+    const onPrep = (p: PrepInfo & { fileId: string }) => {
+      setLib((cur) => cur && { ...cur, films: cur.films.map((f) => (f.id === p.fileId ? { ...f, prep: { state: p.state, progress: p.progress, error: p.error } } : f)) });
+    };
     socket.on('cinema:state', onState);
+    socket.on('cinema:prep', onPrep);
     socket.on('connect', watch);
     if (socket.connected) watch();
     return () => {
       socket.off('cinema:state', onState);
+      socket.off('cinema:prep', onPrep);
       socket.off('connect', watch);
       socket.emit('cinema:unwatch', { channelId: channel.id });
     };
@@ -200,11 +231,52 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
     emit('cinema:buffering', { buffering });
   };
 
+  const film = lib?.films.find((f) => f.id === fileId);
+  const prepared = !local && !!film?.needsPrep && film.prep?.state === 'ready';
+  const hlsUrl = prepared && lib ? `/api/cinema/hls/${encodeURIComponent(lib.key)}/${fileId}/master.m3u8` : '';
+  const src = local ? local.url : hlsUrl ? '' : fileId && lib ? `/api/cinema/file/${fileId}?k=${encodeURIComponent(lib.key)}` : '';
+  const playerKey = local ? local.url : hlsUrl || src;
+
   // ---------- o <video> ----------
   const attach = useCallback(
     (el: HTMLVideoElement | null) => {
       video.current = el;
-      if (!el) return;
+      if (!el) {
+        hls.current?.destroy();
+        hls.current = null;
+        setTracks([]);
+        setTrack(-1);
+        return;
+      }
+      if (hlsUrl) {
+        // versão preparada: o hls.js toca os pedaços e troca a faixa de áudio sem parar o vídeo
+        void import('hls.js').then(({ default: HlsJs }) => {
+          if (video.current !== el) return;
+          if (!HlsJs.isSupported()) return setBroken(true);
+          const h = new HlsJs({ maxBufferLength: 60, maxMaxBufferLength: 240, backBufferLength: 60 });
+          hls.current = h;
+          const syncTracks = () => {
+            setTracks(h.audioTracks.map((t) => ({ id: t.id, name: t.name, lang: t.lang ?? '' })));
+            setTrack(h.audioTrack);
+          };
+          h.on(HlsJs.Events.AUDIO_TRACKS_UPDATED, () => {
+            syncTracks();
+            // volta para a faixa que a pessoa escolheu da última vez (mesmo nome ou mesmo idioma)
+            const pref = readAudioPref();
+            const i = pref ? h.audioTracks.findIndex((t) => t.name === pref || (t.lang && t.lang === pref)) : -1;
+            if (i >= 0 && i !== h.audioTrack) h.audioTrack = i;
+          });
+          h.on(HlsJs.Events.AUDIO_TRACK_SWITCHED, syncTracks);
+          h.on(HlsJs.Events.ERROR, (_e, data) => {
+            if (!data.fatal) return;
+            if (data.type === HlsJs.ErrorTypes.MEDIA_ERROR) h.recoverMediaError();
+            else if (data.type === HlsJs.ErrorTypes.NETWORK_ERROR) h.startLoad();
+            else setBroken(true);
+          });
+          h.loadSource(hlsUrl);
+          h.attachMedia(el);
+        });
+      }
       const onMeta = () => {
         const st = stateRef.current;
         if (st?.fileId && !localRef.current) emit('cinema:duration', { fileId: st.fileId, duration: el.duration });
@@ -229,8 +301,20 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
       for (const ev of ['playing', 'canplay', 'canplaythrough', 'progress']) el.addEventListener(ev, onReady);
       if (el.readyState >= 1) onMeta();
     },
-    [apply, channel.id],
+    [apply, channel.id, hlsUrl],
   );
+
+  function pickTrack(i: number) {
+    const h = hls.current;
+    if (!h) return;
+    h.audioTrack = i;
+    const t = h.audioTracks[i];
+    try {
+      localStorage.setItem(AUDIO_PREF_KEY, t?.lang || t?.name || '');
+    } catch {
+      // sem armazenamento
+    }
+  }
 
   const sync: PlayerSync = useMemo(
     () => ({
@@ -241,8 +325,29 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
     [attach, channel.id],
   );
 
-  const film = lib?.films.find((f) => f.id === fileId);
-  const src = local ? local.url : fileId && lib ? `/api/cinema/file/${fileId}?k=${encodeURIComponent(lib.key)}` : '';
+  // a faixa de áudio é de cada um: não muda a dos outros
+  const menuRows =
+    tracks.length > 1
+      ? (close: () => void) => (
+          <div className="mb-1 border-b border-white/10 pb-1">
+            <span className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-xs font-semibold text-white/60">
+              <AudioLines size={13} /> Faixa de áudio
+            </span>
+            {tracks.map((t, i) => (
+              <MenuOption
+                key={t.id}
+                selected={track === i}
+                onClick={() => {
+                  pickTrack(i);
+                  close();
+                }}
+              >
+                <span className="truncate">{t.name}</span>
+              </MenuOption>
+            ))}
+          </div>
+        )
+      : undefined;
   const waitingNames = (state?.waiting ?? []).map(nameOf);
   const viewers = (state?.viewers ?? []).map((id) => detail.members.find((m) => m.id === id)).filter((m) => !!m);
 
@@ -253,6 +358,21 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
   ) : notice ? (
     <span className="rounded-full bg-black/75 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur">{notice}</span>
   ) : undefined;
+
+  // filme que precisa de preparo e ninguém pediu ainda (ex.: o servidor reiniciou): pede agora
+  const needsStart = !!film?.needsPrep && !film.prep && !local;
+  useEffect(() => {
+    if (needsStart && fileId) void prepare(fileId);
+  }, [needsStart, fileId]);
+
+  async function prepare(filmId: string) {
+    try {
+      const { prep } = await api.post<{ prep: PrepInfo | null }>(`/channels/${channel.id}/cinema/films/${filmId}/prepare`);
+      setLib((cur) => cur && { ...cur, films: cur.films.map((f) => (f.id === filmId ? { ...f, prep } : f)) });
+    } catch (err) {
+      toast.error(err);
+    }
+  }
 
   function chooseLocal(file: File | undefined) {
     if (!file || !fileId) return;
@@ -328,8 +448,14 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
                           {fmtSize(f.size)}
                         </span>
                       </span>
+                      {f.audio.length > 1 && (
+                        <span title={f.audio.map((a) => a.label).join(' · ')} className="flex items-center gap-1 rounded-md bg-surface-0 px-1.5 py-0.5 text-[10px] font-bold text-fg-muted">
+                          <AudioLines size={11} /> {f.audio.length} áudios
+                        </span>
+                      )}
                       <span className="rounded-md bg-surface-0 px-1.5 py-0.5 text-[10px] font-bold text-fg-muted uppercase">{f.ext}</span>
                     </button>
+                    {f.needsPrep && <PrepLine film={f} onPrepare={() => void prepare(f.id)} />}
                   </li>
                 );
               })}
@@ -355,6 +481,7 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
             ) : (
               <>
                 <Server size={12} /> Tocando do servidor, na qualidade original{film ? ` · ${fmtSize(film.size)}` : ''}
+                {prepared && tracks.length > 1 && ` · ${tracks.length} faixas de áudio (troque na engrenagem)`}
               </>
             )}
           </div>
@@ -406,7 +533,9 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
       )}
 
       <div className="relative min-h-0 flex-1 bg-black">
-        {broken ? (
+        {!local && film?.needsPrep && film.prep?.state !== 'ready' ? (
+          <PrepScreen film={film} onRetry={() => void prepare(film.id)} onLocal={() => localInput.current?.click()} />
+        ) : broken ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-white/80">
             <TriangleAlert size={32} className="text-amber-300" />
             <p className="font-semibold">Este arquivo não toca aqui</p>
@@ -416,10 +545,10 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
           </div>
         ) : (
           <VideoPlayer
-            key={src}
+            key={playerKey}
             src={src}
             name={state.name || 'Filme'}
-            sync={{ ...sync, banner }}
+            sync={{ ...sync, banner, menuRows }}
             onNoVideo={() => {}}
             onBroken={() => setBroken(true)}
           />
@@ -438,6 +567,64 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
             <span className="font-semibold">O filme já está passando. Clique para entrar na sessão.</span>
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Linha embaixo do filme na biblioteca: preparar a troca de áudio antes da sessão. */
+function PrepLine({ film, onPrepare }: { film: FilmInfo; onPrepare: () => void }) {
+  const p = film.prep;
+  if (p?.state === 'ready') return null;
+  return (
+    <div className="mt-1 flex items-center gap-2 px-3 text-xs text-fg-muted">
+      {p?.state === 'running' || p?.state === 'queued' ? (
+        <>
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+            <span className="block h-full bg-accent transition-[width]" style={{ width: `${Math.round(p.progress * 100)}%` }} />
+          </span>
+          {p.state === 'queued' ? 'Na fila' : `Preparando ${Math.round(p.progress * 100)}%`}
+        </>
+      ) : (
+        <button onClick={onPrepare} className="flex items-center gap-1 font-semibold text-accent hover:underline">
+          <Wand2 size={12} /> {p?.state === 'failed' ? 'Tentar preparar de novo' : 'Preparar agora (troca de áudio)'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Enquanto o servidor prepara o filme escolhido. */
+function PrepScreen({ film, onRetry, onLocal }: { film: FilmInfo; onRetry: () => void; onLocal: () => void }) {
+  const p = film.prep;
+  const failed = p?.state === 'failed';
+  const pct = Math.round((p?.progress ?? 0) * 100);
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/85">
+      {failed ? <TriangleAlert size={32} className="text-amber-300" /> : <Wand2 size={32} className="text-accent" />}
+      <p className="font-display text-lg font-bold">{failed ? 'Não deu para preparar este filme' : 'Preparando o filme…'}</p>
+      <p className="max-w-md text-sm text-white/60">
+        {failed
+          ? p?.error
+          : `Ele tem ${film.audio.length > 1 ? `${film.audio.length} faixas de áudio` : 'um áudio que o navegador não toca'}. O servidor está separando as faixas para cada um escolher a sua; o vídeo é copiado sem perder nada. Isso só acontece uma vez por filme.`}
+      </p>
+      {!failed && (
+        <div className="w-64">
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/15">
+            <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${pct}%` }} />
+          </div>
+          <span className="mt-1.5 block text-xs text-white/50 tabular-nums">{p?.state === 'queued' ? 'Na fila…' : `${pct}%`}</span>
+        </div>
+      )}
+      <div className="flex gap-2">
+        {failed && (
+          <button onClick={onRetry} className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+            Tentar de novo
+          </button>
+        )}
+        <button onClick={onLocal} className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+          Usar arquivo do meu PC
+        </button>
       </div>
     </div>
   );
