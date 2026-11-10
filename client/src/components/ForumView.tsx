@@ -8,6 +8,7 @@ import { useActiveDetail, useApp } from '../store/app';
 import { profileTriggers } from '../store/popover';
 import { toast } from '../store/toast';
 import { RichText } from './ChatView';
+import { LinkPreviews } from './LinkPreview';
 import { MobileBackButton } from './MobileNav';
 import { Avatar, Button, IconButton, Spinner, cx } from './ui';
 
@@ -511,6 +512,7 @@ function PostDetail({ channel, postId, onBack }: { channel: Channel; postId: str
         <div className="mt-4 text-[15px] leading-relaxed wrap-anywhere whitespace-pre-wrap">
           <RichText text={post.content ?? ''} />
         </div>
+        {post.content && <LinkPreviews text={post.content} className="mt-3" />}
 
         {mod && (
           <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
@@ -628,6 +630,7 @@ function ReplyItem({ reply, mine, mod, onChanged }: { reply: ForumReply; mine: b
       ) : (
         <div className="mt-2 text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap">
           <RichText text={reply.content} />
+          <LinkPreviews text={reply.content} />
         </div>
       )}
     </li>

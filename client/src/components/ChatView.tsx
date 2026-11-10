@@ -1,6 +1,7 @@
 import { ClipCard } from './Clip';
+import { LinkPreviews } from './LinkPreview';
 import { Hash, Pencil, Reply, Trash2, Users } from 'lucide-react';
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AttachButton, ExpiryBadge, MessageAttachments, PendingAttachments, pickAttachments, useAttachmentDraft } from './Attachments';
 import { P, has } from '../../../shared/permissions.ts';
 import { api } from '../lib/api';
@@ -301,6 +302,7 @@ function Bubble({
           )
         )}
         {!editing && jamLink && !onlyJamLink && <JamCard url={jamLink.url} jam={jamLink.jam} authorName={name} mine={mine} />}
+        {!editing && plain && !onlyJamLink && message.content && <LinkPreviews text={message.content} exclude={[jamLink?.url]} />}
         {!editing && <MessageAttachments items={message.attachments} />}
         <ExpiryBadge expiresAt={message.expiresAt} />
       </div>
@@ -311,6 +313,51 @@ function Bubble({
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,:;"')\]!?])/g;
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i;
 const MENTION_RE = /(@[a-zA-Z0-9_.]{3,32})/g;
+
+/**
+ * Formatação como no Discord: ***negrito e itálico***, **negrito**, *itálico* ou _itálico_, ~~riscado~~ (dá para
+ * misturar: **negrito com ~~riscado~~ dentro**). O _ só vale com espaço/pontuação em volta, para "joao_silva_2"
+ * continuar sendo um nome. Asterisco solto ("5 * 3") não formata nada.
+ */
+const FORMAT_RE = /\*\*\*(?!\s)([\s\S]+?)(?<!\s)\*\*\*|\*\*(?!\s)([\s\S]+?)(?<!\s)\*\*|~~(?!\s)([\s\S]+?)(?<!\s)~~|\*(?![\s*])([\s\S]+?)(?<![\s*])\*|(?<![\p{L}\p{N}_])_(?![\s_])([\s\S]+?)(?<![\s_])_(?![\p{L}\p{N}_])/u;
+
+function mentions(text: string, key: string): ReactNode[] {
+  return text.split(MENTION_RE).map((piece, j) =>
+    j % 2 === 1 ? (
+      <span key={`${key}m${j}`} className="rounded-md bg-accent/20 px-1 font-semibold text-accent">
+        {piece}
+      </span>
+    ) : (
+      <Fragment key={`${key}t${j}`}>{piece}</Fragment>
+    ),
+  );
+}
+
+export function formatText(text: string, key = 'f', depth = 0): ReactNode[] {
+  const m = depth < 6 ? FORMAT_RE.exec(text) : null;
+  if (!m) return mentions(text, key);
+  const before = text.slice(0, m.index);
+  const after = text.slice(m.index + m[0].length);
+  const [, boldItalic, bold, strike, italic, italicUnderscore] = m;
+  const inner = formatText(boldItalic ?? bold ?? strike ?? italic ?? italicUnderscore ?? '', `${key}i`, depth + 1);
+  const wrapped =
+    boldItalic !== undefined ? (
+      <strong key={`${key}w`} className="font-bold">
+        <em>{inner}</em>
+      </strong>
+    ) : bold !== undefined ? (
+      <strong key={`${key}w`} className="font-bold">
+        {inner}
+      </strong>
+    ) : strike !== undefined ? (
+      <s key={`${key}w`} className="decoration-fg/60">
+        {inner}
+      </s>
+    ) : (
+      <em key={`${key}w`}>{inner}</em>
+    );
+  return [...mentions(before, `${key}b`), wrapped, ...formatText(after, `${key}a`, depth)];
+}
 
 export function RichText({ text }: { text: string }) {
   const parts = text.split(URL_RE);
@@ -323,17 +370,7 @@ export function RichText({ text }: { text: string }) {
             {p}
           </a>
         ) : (
-          <Fragment key={i}>
-            {p.split(MENTION_RE).map((piece, j) =>
-              j % 2 === 1 ? (
-                <span key={j} className="rounded-md bg-accent/20 px-1 font-semibold text-accent">
-                  {piece}
-                </span>
-              ) : (
-                <Fragment key={j}>{piece}</Fragment>
-              ),
-            )}
-          </Fragment>
+          <Fragment key={i}>{formatText(p, `p${i}`)}</Fragment>
         ),
       )}
       {images.map((src) => (
@@ -472,7 +509,30 @@ export function Composer({ channel, compact = false }: { channel: Channel; compa
     }
   }
 
+  // Ctrl+B negrito, Ctrl+I itálico, Ctrl+Shift+X riscado: envolve o trecho selecionado (ou abre o par no cursor)
+  function wrapSelection(mark: string) {
+    const el = inputRef.current;
+    if (!el) return;
+    const { selectionStart: a, selectionEnd: b } = el;
+    const picked = text.slice(a, b);
+    const next = text.slice(0, a) + mark + picked + mark + text.slice(b);
+    setText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(a + mark.length, b + mark.length);
+    });
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      const mark = k === 'b' && !e.shiftKey ? '**' : k === 'i' && !e.shiftKey ? '*' : k === 'x' && e.shiftKey ? '~~' : null;
+      if (mark) {
+        e.preventDefault();
+        wrapSelection(mark);
+        return;
+      }
+    }
     if (open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();

@@ -57,6 +57,7 @@ import { registerPresenceRoutes, registerPublicPresenceRoutes } from './presence
 import { registerPinterestRoutes } from './pinterest.ts';
 import { registerBigUploadRoutes, sweepUploads } from './bigupload.ts';
 import { registerCinemaPublicRoutes, registerCinemaRoutes } from './cinema.ts';
+import { registerLinkPreviewImageRoute, registerLinkPreviewRoutes } from './linkPreview.ts';
 import {
   avatarLocked,
   mecenasBadge,
@@ -955,6 +956,8 @@ registerCspReportRoutes(api);
 
 // o <video> do cinema não manda o login: o arquivo vem com uma chave assinada
 registerCinemaPublicRoutes(api);
+// imagens das prévias de link (endereço assinado; o <img> não manda o login)
+registerLinkPreviewImageRoute(api);
 
 api.use(requireAuth);
 
@@ -2286,6 +2289,9 @@ registerBigUploadRoutes(api, { attachmentJson, allowUpload: uploadsPerUser, huma
 
 // sala de cinema: biblioteca de filmes e estado da sala (ver cinema.ts)
 registerCinemaRoutes(api);
+
+// prévia de links no chat (ver linkPreview.ts)
+registerLinkPreviewRoutes(api);
 
 /**
  * Validade da mensagem: 5 a 55 minutos (de 5 em 5), 1 a 24 horas ou 1 a 30 dias (em segundos, como o app manda). Sem validade: null.

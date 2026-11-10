@@ -8,6 +8,7 @@ import { profileTriggers } from '../store/popover';
 import { toast } from '../store/toast';
 import { AttachButton, ExpiryBadge, MessageAttachments, PendingAttachments, useAttachmentDraft } from './Attachments';
 import { RichText } from './ChatView';
+import { LinkPreviews } from './LinkPreview';
 import { GameCard, GameMenuButton } from './Games';
 import { StickerButton, StickerMessage } from './StickerPicker';
 import { activityLabel } from './MemberList';
@@ -336,6 +337,7 @@ function DmBubble({ message, grouped }: { message: Message; grouped: boolean }) 
             </div>
           )
         )}
+        {!editing && message.content && <LinkPreviews text={message.content} />}
         {!editing && <MessageAttachments items={message.attachments} />}
         <ExpiryBadge expiresAt={message.expiresAt} />
       </div>

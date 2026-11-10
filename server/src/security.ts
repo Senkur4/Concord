@@ -54,7 +54,8 @@ function reportOnlyPolicy() {
     "media-src 'self' data: blob:",
     `connect-src 'self'${livekit ? ` ${livekit}` : ''}`,
     "worker-src 'self' blob:",
-    turnstile ? `frame-src ${turnstile}` : "frame-src 'none'",
+    // player do YouTube nas prévias de link (o domínio sem cookies de rastreio)
+    `frame-src https://www.youtube-nocookie.com${turnstile ? ` ${turnstile}` : ''}`,
     "form-action 'self'",
     ENFORCED,
     'report-uri /api/csp-report',
