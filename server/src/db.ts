@@ -312,6 +312,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_categories_server ON categories(server_id, position);
 `);
 addColumn('channels', 'category_id', 'TEXT REFERENCES categories(id) ON DELETE SET NULL');
+// sala de cinema: uma sala de voz com a tela de filmes (ver cinema.ts)
+addColumn('channels', 'cinema', 'INTEGER NOT NULL DEFAULT 0');
 // nomes personalizados dos grupos padrão ({"voice": "🔊 Calls", "text": "💬 Papo"}); vazio = Salas, Fóruns, Conversas
 addColumn('servers', 'group_labels', "TEXT NOT NULL DEFAULT '{}'");
 // ordem da barra lateral, misturando grupos padrão e categorias: ["group:voice", "cat:<id>", "group:text", ...].
@@ -804,6 +806,8 @@ export interface ChannelRow {
   position: number;
   user_limit: number;
   category_id: string | null;
+  /** 1 = sala de cinema (só em salas de voz) */
+  cinema?: number;
 }
 
 export interface CategoryRow {

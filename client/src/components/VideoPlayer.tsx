@@ -97,11 +97,33 @@ const fmt = (t: number) => {
   return h ? `${h}:${m.toString().padStart(2, '0')}:${s}` : `${m}:${s}`;
 };
 
-export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: string; name: string; onNoVideo: () => void; onBroken: () => void; footer?: ReactNode }) {
+/**
+ * Modo sincronizado (sala de cinema): o player não toca, pausa nem pula sozinho. Ele pede para a sala, e quem manda
+ * no <video> é o controlador da sala (que recebe o elemento por `attach`). O resto (volume, legenda, tela cheia) é
+ * de cada um.
+ */
+export interface PlayerSync {
+  request: (action: 'play' | 'pause' | 'seek', t: number) => void;
+  attach: (el: HTMLVideoElement | null) => void;
+  /** linhas a mais no menu de configurações */
+  menuRows?: (close: () => void) => ReactNode;
+  /** recado em cima do vídeo (ex.: esperando alguém carregar) */
+  banner?: ReactNode;
+}
+
+export function VideoPlayer({ src, name, onNoVideo, onBroken, footer, sync }: { src: string; name: string; onNoVideo: () => void; onBroken: () => void; footer?: ReactNode; sync?: PlayerSync }) {
   const box = useRef<HTMLDivElement>(null);
-  const video = useRef<HTMLVideoElement>(null);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const attach = sync?.attach;
+  const videoRef = useCallback(
+    (el: HTMLVideoElement | null) => {
+      video.current = el;
+      attach?.(el);
+    },
+    [attach],
+  );
   const subInput = useRef<HTMLInputElement>(null);
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(!!sync);
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [time, setTime] = useState(0);
@@ -150,11 +172,18 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: s
   const toggle = () => {
     const el = v();
     setStarted(true);
+    if (sync) return sync.request(el.paused || el.ended ? 'play' : 'pause', el.currentTime);
     if (el.paused || el.ended) void el.play().catch(() => {});
     else el.pause();
   };
   const seek = (t: number) => {
     const el = v();
+    if (sync) {
+      const to = Math.max(0, Math.min(duration || el.duration || 0, t));
+      sync.request('seek', to);
+      setTime(to);
+      return;
+    }
     el.currentTime = Math.max(0, Math.min(duration || el.duration || 0, t));
     setTime(el.currentTime);
   };
@@ -234,13 +263,13 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: s
       onMouseMove={poke}
       onMouseLeave={() => playing && setShowUi(false)}
       aria-label={`Player de vídeo: ${name}`}
-      className={cx('group/player relative bg-black outline-none [container-type:inline-size]', full ? 'flex h-full w-full items-center justify-center' : '', !uiVisible && 'cursor-none')}
+      className={cx('group/player relative bg-black outline-none [container-type:inline-size]', full || sync ? 'flex h-full w-full items-center justify-center' : '', !uiVisible && 'cursor-none')}
     >
       <video
-        ref={video}
-        preload="metadata"
+        ref={videoRef}
+        preload={sync ? 'auto' : 'metadata'}
         playsInline
-        src={`${src}#t=0.1`}
+        src={sync ? src : `${src}#t=0.1`}
         onClick={() => {
           toggle();
           setMenu(null);
@@ -273,7 +302,7 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: s
           setMuted(e.currentTarget.muted);
         }}
         onError={onBroken}
-        className={cx('block w-full bg-black object-contain', full ? 'h-full max-h-none' : 'aspect-video max-h-[360px]')}
+        className={cx('block w-full bg-black object-contain', full || sync ? 'h-full max-h-none' : 'aspect-video max-h-[360px]')}
       />
 
       {/* legenda */}
@@ -303,6 +332,7 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: s
       {waiting && playing && (
         <span className="pointer-events-none absolute top-1/2 left-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-4 border-white/25 border-t-white" />
       )}
+      {sync?.banner && <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">{sync.banner}</div>}
       {msg && <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-xl bg-black/80 px-3 py-2 text-xs text-white">{msg}</div>}
 
       {/* controles */}
@@ -392,7 +422,9 @@ export function VideoPlayer({ src, name, onNoVideo, onBroken, footer }: { src: s
         <div className="absolute right-2 bottom-14 z-10 max-h-[calc(100%-4rem)] w-64 overflow-y-auto overscroll-contain rounded-2xl bg-black/90 p-1.5 text-sm text-white shadow-2xl ring-1 ring-white/10 backdrop-blur" role="menu">
           {menu === 'main' && (
             <>
-              <MenuRow label="Velocidade" value={speed === 1 ? 'Normal' : `${speed}x`} onClick={() => setMenu('speed')} />
+              {sync?.menuRows?.(() => setMenu(null))}
+              {/* na sala de cinema a velocidade é a da sala (o controlador ajusta de leve para sincronizar) */}
+              {!sync && <MenuRow label="Velocidade" value={speed === 1 ? 'Normal' : `${speed}x`} onClick={() => setMenu('speed')} />}
               <MenuRow label="Legenda" value={subs ? (subsOn ? 'Ligada' : 'Desligada') : 'Nenhuma'} onClick={() => setMenu('subs')} />
               <MenuRow label="Estilo da legenda" value={`${font.label} · ${size.label}`} onClick={() => setMenu('style')} />
             </>

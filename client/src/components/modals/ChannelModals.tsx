@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, FolderClosed, Hash, MessagesSquare, Slash, Trash2, Volume2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Clapperboard, FolderClosed, Hash, MessagesSquare, Slash, Trash2, Volume2, X } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { P, PERMISSION_INFO, has } from '../../../../shared/permissions.ts';
 import { api } from '../../lib/api';
@@ -12,6 +12,7 @@ const TYPE_INFO = {
   text: { icon: <Hash size={22} />, label: 'Texto', hint: 'Mensagens, links e imagens' },
   forum: { icon: <MessagesSquare size={22} />, label: 'Fórum', hint: 'Posts com votos e respostas: ideias, bugs, ajuda' },
   voice: { icon: <Volume2 size={22} />, label: 'Sala de voz', hint: 'Voz, câmera e transmissão de tela a 60 fps' },
+  cinema: { icon: <Clapperboard size={22} />, label: 'Sala de cinema', hint: 'Sala de voz com uma tela: todos assistem os filmes da pasta juntos, sincronizados' },
 } as const;
 
 /** Seletor de categoria (some quando o servidor não tem nenhuma). */
@@ -40,7 +41,7 @@ function CategorySelect({ detail, value, onChange }: { detail: ServerDetail; val
 export function CreateChannelModal({ serverId, kind, categoryId: initialCategory = null }: { serverId: string; kind: 'text' | 'voice' | 'forum'; categoryId?: string | null }) {
   const close = useApp((s) => s.closeModal);
   const detail = useApp((s) => s.details[serverId]);
-  const [type, setType] = useState(kind);
+  const [type, setType] = useState<'text' | 'voice' | 'forum' | 'cinema'>(kind);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(initialCategory);
   const [isPrivate, setPrivate] = useState(false);
@@ -65,7 +66,7 @@ export function CreateChannelModal({ serverId, kind, categoryId: initialCategory
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-2">
           <span className="block text-xs font-bold tracking-wide text-fg-muted uppercase">Tipo de canal</span>
-          {(['text', 'forum', 'voice'] as const).map((t) => (
+          {(['text', 'forum', 'voice', 'cinema'] as const).map((t) => (
             <button
               type="button"
               key={t}
@@ -83,7 +84,7 @@ export function CreateChannelModal({ serverId, kind, categoryId: initialCategory
             </button>
           ))}
         </div>
-        <NameInput label="Nome do canal" value={name} onValueChange={setName} placeholder={type === 'voice' ? '🔊 Nova sala' : type === 'forum' ? 'ideias' : 'novo-canal'} autoFocus required maxLength={50} />
+        <NameInput label="Nome do canal" value={name} onValueChange={setName} placeholder={type === 'voice' ? '🔊 Nova sala' : type === 'cinema' ? '🎬 Cinema' : type === 'forum' ? 'ideias' : 'novo-canal'} autoFocus required maxLength={50} />
         {detail && <CategorySelect detail={detail} value={categoryId} onChange={setCategoryId} />}
         <div className="flex items-center justify-between rounded-xl bg-surface-0 p-3">
           <div>
@@ -126,7 +127,7 @@ export function ChannelSettingsModal({ serverId, channelId }: { serverId: string
   }
 
   return (
-    <Modal title={<span className="flex items-center gap-2">{channel.type === 'voice' ? <Volume2 size={20} /> : channel.type === 'forum' ? <MessagesSquare size={20} /> : <Hash size={20} />} {channel.name}</span>} onClose={close} width={720}>
+    <Modal title={<span className="flex items-center gap-2">{channel.cinema ? <Clapperboard size={20} /> : channel.type === 'voice' ? <Volume2 size={20} /> : channel.type === 'forum' ? <MessagesSquare size={20} /> : <Hash size={20} />} {channel.name}</span>} onClose={close} width={720}>
       <div className="mb-5 flex gap-1 border-b border-line">
         {(['overview', 'perms'] as const).map((t) => (
           <button

@@ -56,6 +56,7 @@ import { integrationsStatus, registerIntegrationRoutes, registerPublicIntegratio
 import { registerPresenceRoutes, registerPublicPresenceRoutes } from './presence.ts';
 import { registerPinterestRoutes } from './pinterest.ts';
 import { registerBigUploadRoutes, sweepUploads } from './bigupload.ts';
+import { registerCinemaPublicRoutes, registerCinemaRoutes } from './cinema.ts';
 import {
   avatarLocked,
   mecenasBadge,
@@ -952,6 +953,9 @@ registerPublicPresenceRoutes(api);
 registerClientErrorRoutes(api);
 registerCspReportRoutes(api);
 
+// o <video> do cinema não manda o login: o arquivo vem com uma chave assinada
+registerCinemaPublicRoutes(api);
+
 api.use(requireAuth);
 
 // Conta com senha e sem e-mail confirmado (criada antes do e-mail obrigatório): até confirmar um e-mail, só dá
@@ -1409,6 +1413,7 @@ api.get('/servers/:id', (req, res) => {
       topic: c.topic,
       position: c.position,
       userLimit: c.user_limit,
+      cinema: c.type === 'voice' && !!c.cinema,
       categoryId: c.category_id,
       overwrites: channelOverwrites(c.id),
       permissions: perms,
@@ -1596,7 +1601,9 @@ function placeChannel(channel: ChannelRow, categoryId: string | null, beforeId: 
 
 api.post('/servers/:id/channels', (req, res) => {
   const server = requireServerPerm(req.params.id, uid(res), P.MANAGE_CHANNELS);
-  const type = req.body?.type === 'voice' || req.body?.type === 'forum' ? req.body.type : 'text';
+  // sala de cinema = sala de voz com a tela de filmes: ganha tudo da voz (entrar, falar, papo, permissões)
+  const cinema = req.body?.type === 'cinema';
+  const type = cinema || req.body?.type === 'voice' ? 'voice' : req.body?.type === 'forum' ? 'forum' : 'text';
   const name = normalizeChannelName(str(req.body?.name, 'nome', 1, 50), type);
   const topic = optStr(req.body?.topic, 'tópico', 0, 300) ?? '';
   const categoryId = categoryOf(server.id, req.body?.categoryId);
@@ -1606,7 +1613,7 @@ api.post('/servers/:id/channels', (req, res) => {
     ...categoryArgs(categoryId),
   )!.p;
   const id = randomUUID();
-  run('INSERT INTO channels (id, server_id, name, type, topic, position, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)', id, server.id, name, type, topic, pos, categoryId);
+  run('INSERT INTO channels (id, server_id, name, type, topic, position, category_id, cinema) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, server.id, name, type, topic, pos, categoryId, cinema ? 1 : 0);
   if (req.body?.private === true) {
     run('INSERT INTO channel_overwrites (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)', id, everyoneRole(server.id).id, P.VIEW_CHANNEL);
   }
@@ -2276,6 +2283,9 @@ api.post('/attachments', humansOnly, attachmentBody, (req, res) => {
 
 // anexos grandes: em pedaços, direto para o disco (ver bigupload.ts)
 registerBigUploadRoutes(api, { attachmentJson, allowUpload: uploadsPerUser, humansOnly });
+
+// sala de cinema: biblioteca de filmes e estado da sala (ver cinema.ts)
+registerCinemaRoutes(api);
 
 /**
  * Validade da mensagem: 5 a 55 minutos (de 5 em 5), 1 a 24 horas ou 1 a 30 dias (em segundos, como o app manda). Sem validade: null.

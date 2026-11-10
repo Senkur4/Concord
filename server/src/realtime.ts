@@ -6,6 +6,7 @@ import { all, get, type ChannelRow } from './db.ts';
 import { botUserId, verifyToken } from './http.ts';
 import { removeFromRoom, updateVoicePermission, voiceParticipants } from './livekit.ts';
 import { socketEvents, timedSocket } from './metrics.ts';
+import { registerCinemaSocket } from './cinema.ts';
 
 export interface VoiceState {
   userId: string;
@@ -329,7 +330,7 @@ export function liveStats() {
   };
 }
 
-const KNOWN_SOCKET_EVENTS = new Set(['voice:join', 'voice:update', 'voice:leave', 'voice:codec-fail', 'voice:codec-request', 'reaction', 'activity:set', 'typing', 'dev:ping']);
+const KNOWN_SOCKET_EVENTS = new Set(['voice:join', 'voice:update', 'voice:leave', 'voice:codec-fail', 'voice:codec-request', 'reaction', 'activity:set', 'typing', 'dev:ping', 'cinema:time', 'cinema:watch', 'cinema:unwatch', 'cinema:control', 'cinema:duration', 'cinema:buffering']);
 
 // Faxina das salas de voz. O LiveKit aceita qualquer um com token válido, mas só vale estar numa sala quem entrou
 // pelo app (aparece na lista dela) e ainda pode conectar nela. Sai quem foi expulso do servidor, perdeu a
@@ -506,6 +507,9 @@ export function setupRealtime(httpServer: HttpServer) {
     socket.on('dev:ping', (ack: unknown) => {
       if (typeof ack === 'function') ack();
     });
+
+    // sala de cinema: quem está vendo, play/pausa/pulo e a espera por quem travou (ver cinema.ts)
+    registerCinemaSocket(io, socket, userId);
 
     socket.on('typing', (data: { channelId: string }) => {
       try {

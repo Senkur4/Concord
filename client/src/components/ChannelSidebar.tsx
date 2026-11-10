@@ -20,6 +20,7 @@ import {
   Video,
   VideoOff,
   Volume2,
+  Clapperboard,
 } from 'lucide-react';
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { P, has } from '../../../shared/permissions.ts';
@@ -533,7 +534,7 @@ function RoomCard({ detail, channel }: { detail: ServerDetail; channel: Channel 
       )}
     >
       <div className="flex items-center gap-2">
-        {!participants.length && <Volume2 size={17} className="shrink-0 text-fg-subtle" />}
+        {!participants.length && (channel.cinema ? <Clapperboard size={17} className="shrink-0 text-fg-subtle" /> : <Volume2 size={17} className="shrink-0 text-fg-subtle" />)}
         <span className={cx('flex-1 truncate text-[15px] font-bold', expanded || participants.length ? 'text-fg' : 'text-fg-muted')}>{channel.name}</span>
         {isPrivate && <Lock size={13} className="shrink-0 text-fg-subtle" />}
         {streamer ? (

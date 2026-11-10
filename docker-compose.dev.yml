@@ -32,8 +32,12 @@
          # anexos: tamanho máximo em GB (vazio = sem limite) e quanto do disco sempre fica livre (padrão 5 GB)
          ATTACH_MAX_GB: ${ATTACH_MAX_GB:-}
          ATTACH_DISK_RESERVE_GB: ${ATTACH_DISK_RESERVE_GB:-5}
+         # sala de cinema: filmes da pasta "videos" (ao lado deste arquivo) e quanto do upload eles podem usar (Mbps)
+         CINEMA_DIR: /videos
+         CINEMA_MAX_MBPS: ${CINEMA_MAX_MBPS:-70}
        volumes:
          - ./data-dev:/data
+         - ./videos:/videos:ro
        depends_on:
          - livekit
 

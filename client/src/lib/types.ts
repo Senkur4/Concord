@@ -219,6 +219,8 @@ export interface Channel {
   topic: string;
   position: number;
   userLimit: number;
+  /** sala de cinema: uma sala de voz com a tela de filmes */
+  cinema?: boolean;
   /** categoria onde o canal está (null = nos grupos padrão: Salas, Fóruns, Conversas) */
   categoryId: string | null;
   overwrites: Overwrite[];

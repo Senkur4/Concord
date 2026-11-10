@@ -39,6 +39,7 @@ import { VoiceEffectsButton } from './VoiceEffectsButton';
 import { StickerButton, StickerLayer } from './Stickers';
 import { ClipButton } from './Clip';
 import { JamButton } from './Jam';
+import { CinemaStage } from './CinemaStage';
 import { CodecRequests, H265Help, ShareCodecBadge } from './H265Help';
 import { isPoppedOut, popOutVideo } from '../lib/popout';
 import { streamLayers, useRemoteVideoQuality, useViewQuality, type ViewQuality } from '../lib/viewQuality';
@@ -91,6 +92,7 @@ export function VoiceView({ channel }: { channel: Channel }) {
   const streamer = inRoom.find((v) => v.streaming);
   const streamerMember = streamer && detail.members.find((m) => m.id === streamer.userId);
   const canChat = has(channel.permissions, P.VIEW_CHANNEL);
+  const join = useVoice((s) => s.join);
   const [chatOpen, setChatOpen] = useState(() => readFlag('concord.roomChat', true));
   const [panelTab, setPanelTab] = useState<'chat' | 'members'>('chat');
   const [panelWidth, setPanelWidth] = useState(() => readNumber('concord.roomPanelWidth', PANEL_DEFAULT));
@@ -116,7 +118,13 @@ export function VoiceView({ channel }: { channel: Channel }) {
             {streamerMember ? `${memberName(streamerMember)} está transmitindo` : inRoom.length ? `${inRoom.length} na sala` : 'Sala vazia'}
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <JamButton detail={detail} channel={channel} />
+            {/* no cinema dá para assistir sem entrar na voz */}
+            {channel.cinema && status === 'idle' && has(channel.permissions, P.CONNECT) && (
+              <Button className="h-10 px-4" onClick={() => void join(detail.server.id, channel.id)}>
+                Entrar na voz
+              </Button>
+            )}
+            {!channel.cinema && <JamButton detail={detail} channel={channel} />}
             {status === 'connected' && <ConnectionQuality />}
             {canChat && (
               <button
@@ -136,7 +144,17 @@ export function VoiceView({ channel }: { channel: Channel }) {
         </div>
 
         <section aria-label="Palco da sala" className="relative min-h-0 flex-1 overflow-hidden rounded-[32px] bg-surface-0">
-          {status === 'idle' ? (
+          {channel.cinema ? (
+            <>
+              <CinemaStage channel={channel} detail={detail} />
+              {status === 'connected' && (
+                <>
+                  <SoundToast />
+                  <ReactionLayer />
+                </>
+              )}
+            </>
+          ) : status === 'idle' ? (
             <JoinSplash detail={detail} channel={channel} />
           ) : status === 'connecting' ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-fg-muted">
