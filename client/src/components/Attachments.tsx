@@ -1,8 +1,9 @@
 // Anexos nas conversas (canais, chat da call e DMs): o arquivo sobe assim que é escolhido e só
 // aparece para alguém quando a mensagem é enviada junto com ele.
-import { Check, Download, FileText, Hourglass, Infinity as InfinityIcon, Paperclip, RotateCw, X } from 'lucide-react';
+import { Check, Download, ExternalLink, FileText, FolderOpen, Hourglass, Infinity as InfinityIcon, Paperclip, RotateCw, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { uploadInChunks, type UploadProgress } from '../lib/chunkUpload';
+import { canTrackDownloads, cancelDownload, dismissDownload, openDownloaded, retryDownload, showDownloaded, startDownload, useDownload, type DownloadState } from '../lib/downloads';
 import type { Attachment } from '../lib/types';
 import { useApp } from '../store/app';
 import { toast } from '../store/toast';
@@ -394,10 +395,9 @@ function VideoAttachment({ a }: { a: Attachment }) {
       <figcaption className="flex items-center gap-2 bg-surface-3 px-3 py-2 text-xs">
         <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
         <span className="shrink-0 text-fg-subtle">{formatSize(a.size)}</span>
-        <a href={a.url} download={a.name} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
-          <Download size={15} />
-        </a>
+        <DownloadIcon a={a} />
       </figcaption>
+      <DownloadLine a={a} className="bg-surface-3 px-3 pb-2.5" />
     </figure>
   );
 }
@@ -410,31 +410,130 @@ function AudioAttachment({ a }: { a: Attachment }) {
       <div className="mb-2 flex items-center gap-2 text-xs">
         <span className="min-w-0 flex-1 truncate font-semibold">{a.name}</span>
         <span className="shrink-0 text-fg-subtle">{formatSize(a.size)}</span>
-        <a href={a.url} download={a.name} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
-          <Download size={15} />
-        </a>
+        <DownloadIcon a={a} />
       </div>
+      <DownloadLine a={a} className="mb-2" />
       <audio controls preload="metadata" src={a.url} onError={() => setBroken(true)} className="w-full" />
     </div>
   );
 }
 
 function FileCard({ a }: { a: Attachment }) {
-  return (
-    <a
-      href={a.url}
-      download={a.name}
-      className="flex w-72 max-w-full items-center gap-3 rounded-2xl bg-surface-3 p-3 ring-1 ring-line transition-colors hover:bg-surface-4"
-    >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-        <FileText size={20} />
+  const dl = useDownload(a.url);
+  const tracked = canTrackDownloads();
+  const inner = (
+    <>
+      <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', dl?.status === 'done' ? 'bg-emerald-500/15 text-emerald-400' : dl?.status === 'failed' ? 'bg-red-500/15 text-red-400' : 'bg-accent/15 text-accent')}>
+        {dl?.status === 'done' ? <Check size={20} /> : dl?.status === 'failed' ? <TriangleAlert size={19} /> : <FileText size={20} />}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-bold">{a.name}</span>
-        <span className="block text-xs text-fg-muted">{formatSize(a.size)}</span>
+        {!dl && <span className="block text-xs text-fg-muted">{formatSize(a.size)}</span>}
       </span>
-      <Download size={17} className="shrink-0 text-fg-muted" />
-    </a>
+      {!dl && <Download size={17} className="shrink-0 text-fg-muted" />}
+    </>
+  );
+  return (
+    <div className="w-72 max-w-full rounded-2xl bg-surface-3 ring-1 ring-line">
+      {/* sem progresso possível neste navegador: o link normal (o navegador mostra o download dele) */}
+      {!tracked ? (
+        <a href={a.url} download={a.name} className="flex items-center gap-3 rounded-2xl p-3 transition-colors hover:bg-surface-4">
+          {inner}
+        </a>
+      ) : dl ? (
+        <div className="flex items-center gap-3 p-3 pb-1">{inner}</div>
+      ) : (
+        <button onClick={() => void startDownload(a.url, a.name, a.size)} title="Baixar" className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-surface-4">
+          {inner}
+        </button>
+      )}
+      {dl && <DownloadLine a={a} className="px-3 pb-3" />}
+    </div>
+  );
+}
+
+/** Botão pequeno de baixar (vídeo e áudio): com progresso quando dá, senão o download do navegador. */
+function DownloadIcon({ a }: { a: Attachment }) {
+  const dl = useDownload(a.url);
+  if (!canTrackDownloads()) {
+    return (
+      <a href={a.url} download={a.name} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
+        <Download size={15} />
+      </a>
+    );
+  }
+  if (dl) return null;
+  return (
+    <button onClick={() => void startDownload(a.url, a.name, a.size)} title="Baixar" aria-label={`Baixar ${a.name}`} className="shrink-0 text-fg-muted hover:text-fg">
+      <Download size={15} />
+    </button>
+  );
+}
+
+const pct = (d: DownloadState) => (d.total ? Math.min(100, Math.floor((d.received / d.total) * 100)) : 0);
+
+/** A linha de progresso: baixando (porcentagem, tamanho, velocidade, quanto falta), baixado ou falhou. */
+function DownloadLine({ a, className }: { a: Attachment; className?: string }) {
+  const dl = useDownload(a.url);
+  if (!dl) return null;
+  if (dl.status === 'downloading') {
+    const p = pct(dl);
+    return (
+      <div className={className} role="status" aria-label={`Baixando ${a.name}: ${p}%`}>
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-0">
+            <div className={cx('h-full rounded-full bg-accent transition-[width] duration-200', !dl.total && 'w-1/3 animate-pulse')} style={dl.total ? { width: `${p}%` } : undefined} />
+          </div>
+          <button onClick={() => cancelDownload(a.url)} title="Cancelar" aria-label="Cancelar o download" className="shrink-0 rounded-full p-0.5 text-fg-muted hover:bg-surface-4 hover:text-fg">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="mt-1 flex justify-between gap-2 text-[11px] text-fg-muted tabular-nums">
+          <span>
+            <b className="text-fg">{p}%</b> · {formatSize(dl.received)} de {formatSize(dl.total || a.size)}
+          </span>
+          <span>{dl.speed > 0 ? `${formatSize(dl.speed)}/s${dl.total ? ` · ${eta(dl.total - dl.received, dl.speed)}` : ''}` : 'começando…'}</span>
+        </div>
+      </div>
+    );
+  }
+  if (dl.status === 'done') {
+    return (
+      <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-1 text-xs', className)} role="status">
+        <span className="flex items-center gap-1 font-semibold text-emerald-400">
+          <Check size={13} /> Baixado{dl.fileName ? ` como ${dl.fileName}` : ''}
+        </span>
+        {dl.desktopId && (
+          <>
+            <button onClick={() => void openDownloaded(dl)} className="flex items-center gap-1 font-semibold text-accent hover:underline">
+              <ExternalLink size={12} /> Abrir
+            </button>
+            <button onClick={() => void showDownloaded(dl)} className="flex items-center gap-1 font-semibold text-accent hover:underline">
+              <FolderOpen size={12} /> Mostrar na pasta
+            </button>
+          </>
+        )}
+        <button onClick={() => dismissDownload(a.url)} title="Fechar" aria-label="Fechar" className="ml-auto rounded-full p-0.5 text-fg-muted hover:bg-surface-4 hover:text-fg">
+          <X size={13} />
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className={cx('text-xs', className)} role="alert">
+      <div className="flex items-center gap-1 font-semibold text-red-400">
+        <TriangleAlert size={13} /> Falhou{dl.total ? ` em ${pct(dl)}%` : ''}
+      </div>
+      <p className="mt-0.5 text-fg-muted">{dl.error ?? 'Não deu para baixar.'}</p>
+      <div className="mt-1.5 flex gap-3">
+        <button onClick={() => void retryDownload(a.url, a.name, a.size)} className="flex items-center gap-1 font-semibold text-accent hover:underline">
+          <RotateCw size={12} /> {dl.desktopId || !dl.received ? 'Tentar de novo' : 'Continuar de onde parou'}
+        </button>
+        <button onClick={() => dismissDownload(a.url)} className="font-semibold text-fg-muted hover:text-fg">
+          Fechar
+        </button>
+      </div>
+    </div>
   );
 }
 

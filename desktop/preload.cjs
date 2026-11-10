@@ -9,6 +9,12 @@ const listen = (channel) => (callback) => {
 
 contextBridge.exposeInMainWorld('concordDesktop', {
   info: () => ipcRenderer.invoke('concord:info'),
+  // anexos baixando direto na pasta Downloads, com progresso
+  downloadStart: (url, name) => ipcRenderer.invoke('concord:download-start', { url, name }),
+  downloadCancel: (id) => ipcRenderer.invoke('concord:download-cancel', id),
+  downloadShow: (id) => ipcRenderer.invoke('concord:download-show', id),
+  downloadOpen: (id) => ipcRenderer.invoke('concord:download-open', id),
+  onDownloadProgress: listen('concord:download-progress'),
   devInfoStatic: () => ipcRenderer.invoke('concord:dev-info-static'),
   devInfoLive: () => ipcRenderer.invoke('concord:dev-info-live'),
   openDevWindow: () => ipcRenderer.invoke('concord:open-dev-window'),

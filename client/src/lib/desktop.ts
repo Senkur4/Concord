@@ -50,8 +50,22 @@ export interface DesktopDevInfoLive {
 
 export type DesktopDevInfo = DesktopDevInfoStatic & DesktopDevInfoLive;
 
+export interface DesktopDownloadProgress {
+  id: string;
+  state: 'progressing' | 'interrupted' | 'completed' | 'cancelled';
+  received: number;
+  total: number;
+  fileName: string;
+}
+
 interface DesktopBridge {
   info(): Promise<DesktopInfo>;
+  // anexos baixando direto na pasta Downloads (ausente em versões antigas do app)
+  downloadStart?(url: string, name: string): Promise<string>;
+  downloadCancel?(id: string): Promise<void>;
+  downloadShow?(id: string): Promise<void>;
+  downloadOpen?(id: string): Promise<void>;
+  onDownloadProgress?(cb: (p: DesktopDownloadProgress) => void): () => void;
   // ausentes em versões antigas do app desktop
   devInfoStatic?(): Promise<DesktopDevInfoStatic>;
   devInfoLive?(): Promise<DesktopDevInfoLive>;

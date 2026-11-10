@@ -229,6 +229,7 @@ function setupSession() {
     callback(allowed.has(permission) && fromServer(details.requestingUrl || wc.getURL()));
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && fromServer(origin));
+  setupDownloads();
 
   // A página escolhe a fonte no seletor do próprio Concord (concord:select-source) e
   // só depois chama getDisplayMedia; aqui entregamos exatamente a fonte escolhida.
@@ -293,6 +294,80 @@ function handle(channel, fn) {
     return fn(event, ...args);
   });
 }
+
+// ------------------------------------------------------------------ downloads com progresso
+// Os anexos do chat baixam direto na pasta Downloads (como no Discord), e a página mostra a porcentagem, a
+// velocidade, se terminou ou falhou. Só para endereços do próprio servidor; os outros downloads seguem o padrão.
+
+const downloads = new Map(); // id -> { item, path, sender }
+const pendingDownloads = new Map(); // endereço -> { id, name, sender }
+let downloadSeq = 0;
+
+function safeFileName(name) {
+  const clean = String(name || 'arquivo').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').slice(0, 180);
+  return clean || 'arquivo';
+}
+
+/** "foto.png" já existe? vira "foto (1).png", "foto (2).png"... */
+function uniquePath(dir, name) {
+  const ext = path.extname(name);
+  const base = name.slice(0, name.length - ext.length);
+  let candidate = path.join(dir, name);
+  for (let i = 1; fs.existsSync(candidate) && i < 1000; i++) candidate = path.join(dir, `${base} (${i})${ext}`);
+  return candidate;
+}
+
+function setupDownloads() {
+  session.defaultSession.on('will-download', (_event, item) => {
+    const key = item.getURLChain()[0] || item.getURL();
+    const pending = pendingDownloads.get(key);
+    if (!pending) return; // download comum: o Electron cuida (com a janela de salvar)
+    pendingDownloads.delete(key);
+    const target = uniquePath(app.getPath('downloads'), safeFileName(pending.name || item.getFilename()));
+    item.setSavePath(target);
+    const entry = { item, path: target, sender: pending.sender };
+    downloads.set(pending.id, entry);
+    let last = 0;
+    const send = (state) => {
+      if (entry.sender.isDestroyed()) return;
+      entry.sender.send('concord:download-progress', {
+        id: pending.id,
+        state,
+        received: item.getReceivedBytes(),
+        total: item.getTotalBytes(),
+        fileName: path.basename(target),
+      });
+    };
+    item.on('updated', (_e, state) => {
+      const now = Date.now();
+      // no máximo 4 avisos por segundo (a barra não precisa de mais)
+      if (state === 'interrupted' || now - last > 250) {
+        last = now;
+        send(state === 'interrupted' ? 'interrupted' : 'progressing');
+      }
+    });
+    item.once('done', (_e, state) => send(state)); // completed | cancelled | interrupted
+    send('progressing');
+  });
+}
+
+handle('concord:download-start', (event, opts) => {
+  const url = new URL(String(opts?.url ?? ''), serverOrigin());
+  if (url.origin !== serverOrigin()) throw new Error('Só arquivos do próprio servidor');
+  const id = String(++downloadSeq);
+  pendingDownloads.set(url.toString(), { id, name: opts?.name, sender: event.sender });
+  event.sender.downloadURL(url.toString());
+  return id;
+});
+handle('concord:download-cancel', (_e, id) => downloads.get(String(id))?.item.cancel());
+handle('concord:download-show', (_e, id) => {
+  const d = downloads.get(String(id));
+  if (d) shell.showItemInFolder(d.path);
+});
+handle('concord:download-open', async (_e, id) => {
+  const d = downloads.get(String(id));
+  if (d) await shell.openPath(d.path);
+});
 
 handle('concord:info', () => ({
   platform: process.platform,
