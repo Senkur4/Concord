@@ -24,7 +24,7 @@
 //   DEFAULT_QUALITY (padrão 1080p30), MAX_HEIGHT (padrão 1080), MAX_BITRATE_KBPS (padrão 8000)
 
 import { spawn } from 'node:child_process';
-import { readdir, stat, symlink, unlink, mkdtemp } from 'node:fs/promises';
+import { readdir, stat, symlink, unlink, mkdtemp, link as hardLink, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { io } from 'socket.io-client';
@@ -304,14 +304,29 @@ run('ffmpeg', ['-hide_banner', '-filters'])
   .then((out) => (hasZscale = / zscale /.test(out)))
   .catch(() => {});
 
-/** O caminho vai dentro do filtro de legenda, que se confunde com : ' [ ] , — usa um atalho com nome simples. */
+/**
+ * O caminho vai dentro do filtro de legenda, que se confunde com : ' [ ] , \ — usa um atalho com nome simples
+ * ("s1.mkv"), numa pasta temporária que vira a pasta de trabalho do ffmpeg. Assim nem o "C:" do Windows aparece.
+ * No Windows, atalho simbólico pede administrador: usa um link físico (mesmo disco) e, para legenda externa
+ * (arquivo pequeno), uma cópia.
+ */
 let tmpDir = null;
 let linkSeq = 0;
 async function safeLink(file) {
   tmpDir ??= await mkdtemp(path.join(tmpdir(), 'cine-'));
-  const link = path.join(tmpDir, `s${++linkSeq}${path.extname(file).toLowerCase()}`);
-  await symlink(file, link);
-  return link;
+  const name = `s${++linkSeq}${path.extname(file).toLowerCase()}`;
+  const link = path.join(tmpDir, name);
+  try {
+    await symlink(file, link);
+  } catch (err) {
+    try {
+      await hardLink(file, link);
+    } catch {
+      if ((await stat(file)).size > 50 * 1024 * 1024) throw err;
+      await copyFile(file, link);
+    }
+  }
+  return name;
 }
 
 /**
@@ -338,7 +353,7 @@ async function startDecoder(job, startAt) {
   }
   if (sub && (sub.external || !sub.image)) {
     const link = await safeLink(sub.external ? sub.file : file);
-    links.push(link);
+    links.push(path.join(tmpDir, link)); // para apagar depois (o filtro usa só o nome)
     filters.push(sub.external ? `subtitles=${link}` : `subtitles=${link}:si=${sub.i}`);
   }
   filters.push(`fps=${out.fpsExpr}`, 'format=yuv420p', 'setpts=PTS-STARTPTS');
@@ -346,7 +361,8 @@ async function startDecoder(job, startAt) {
 
   const args = ['-hide_banner', '-loglevel', 'error', ...seek, '-i', file, '-filter_complex', chain.join(';'), '-map', '[vout]', '-fps_mode', 'passthrough', '-f', 'rawvideo', 'pipe:4'];
   if (job.audio) args.push('-map', `0:a:${job.audio.i}`, '-af', 'asetpts=PTS-STARTPTS', '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS), 'pipe:1');
-  const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
+  // a pasta dos atalhos de legenda é a pasta de trabalho: o filtro usa só o nome ("s1.mkv")
+  const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'], cwd: tmpDir ?? undefined });
   ffmpeg.stderr.on('data', (d) => console.error('[ffmpeg]', String(d).trim()));
   const kill = () => {
     if (ffmpeg.exitCode === null) ffmpeg.kill('SIGKILL');
