@@ -35,6 +35,8 @@
          # sala de cinema: filmes da pasta "videos" (ao lado deste arquivo) e quanto do upload eles podem usar (Mbps)
          CINEMA_DIR: /videos
          CINEMA_MAX_MBPS: ${CINEMA_MAX_MBPS:-70}
+         # capas e detalhes dos filmes (chave grátis em themoviedb.org → Configurações → API)
+         TMDB_API_KEY: ${TMDB_API_KEY:-}
        volumes:
          - ./data-dev:/data
          - ./videos:/videos:ro

@@ -12,7 +12,7 @@ import { createReadStream, readdirSync, statSync, type Stats } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { Request, Response, Router } from 'express';
+import express, { type Request, type Response, type Router } from 'express';
 import type { Server, Socket } from 'socket.io';
 import { P, has } from '../../shared/permissions.ts';
 import { channelPermissions, getChannel, requireChannelPerm } from './access.ts';
@@ -20,6 +20,8 @@ import { config } from './config.ts';
 import type { ChannelRow } from './db.ts';
 import { fail, uid } from './http.ts';
 import { needsPrep, onPrepChange, prepFile, prepStatus, probe, requestPrep, type PrepFilm } from './cinemaPrep.ts';
+import { ensureMeta, getMeta, hasTmdb, imgDir, onMetaChange, refreshSeries, resetMeta, saveOwnImage, searchTmdb, setCustom, setTmdbMatch, type Meta, type MetaFilm } from './cinemaMeta.ts';
+import { detectImage } from './uploads.ts';
 
 const VIDEO_EXTS = new Set(['.mp4', '.m4v', '.mkv', '.webm', '.mov']);
 const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/webm' };
@@ -41,6 +43,8 @@ export interface Film {
   file: string;
   size: number;
   ext: string;
+  /** quando o arquivo chegou na pasta (para "Adicionados recentemente") */
+  addedAt: number;
 }
 
 let cache: { at: number; dir: string; films: Film[] } | null = null;
@@ -77,6 +81,7 @@ export function library(force = false): Film[] {
           file: rel,
           size: st.size,
           ext: extname(name).slice(1).toLowerCase(),
+          addedAt: Math.floor(st.mtimeMs),
         });
       }
     }
@@ -90,8 +95,35 @@ export function library(force = false): Film[] {
 const findFilm = (id: string) => library().find((f) => f.id === id) ?? library(true).find((f) => f.id === id);
 const prepFilm = (f: Film): PrepFilm => ({ id: f.id, path: join(cinemaDir(), f.file), size: f.size });
 
-/** O que a biblioteca mostra de cada filme: faixas de áudio e se já está preparado para a troca de áudio. */
-async function filmJson(f: Film) {
+const metaFilm = (f: Film, duration = 0): MetaFilm => ({ id: f.id, file: f.file, path: join(cinemaDir(), f.file), duration });
+
+/** Capa, título e detalhes (com os endereços das imagens guardadas, que levam a chave de quem pediu). */
+function metaJson(m: Meta | undefined, key: string) {
+  if (!m) return null;
+  const img = (n?: string) => (n ? `/api/cinema/img/${encodeURIComponent(key)}/${n}` : null);
+  return {
+    kind: m.kind,
+    source: m.source,
+    tmdbId: m.tmdbId ?? null,
+    title: m.title,
+    year: m.year ?? null,
+    overview: m.overview ?? null,
+    genres: m.genres ?? [],
+    runtime: m.runtime ?? null,
+    rating: m.rating ?? null,
+    poster: img(m.poster),
+    backdrop: img(m.backdrop),
+    frame: img(m.frame),
+    season: m.season ?? null,
+    episode: m.episode ?? null,
+    episodeTitle: m.episodeTitle ?? null,
+    episodeOverview: m.episodeOverview ?? null,
+    still: img(m.still),
+  };
+}
+
+/** O que a biblioteca mostra de cada filme: detalhes, faixas de áudio e se já está preparado para a troca de áudio. */
+async function filmJson(f: Film, key: string) {
   const p = await probe(prepFilm(f));
   return {
     id: f.id,
@@ -99,6 +131,8 @@ async function filmJson(f: Film) {
     file: f.file,
     size: f.size,
     ext: f.ext,
+    addedAt: f.addedAt,
+    meta: metaJson(getMeta(f.id), key),
     duration: p?.duration ?? 0,
     audio: (p?.audio ?? []).map((a) => ({ label: a.label, codec: a.codec })),
     needsPrep: needsPrep(p),
@@ -107,17 +141,19 @@ async function filmJson(f: Film) {
 }
 
 /** ffprobe em até 4 arquivos por vez (o resultado fica guardado; só arquivo novo ou trocado é lido de novo) */
-async function filmsJson(films: Film[]) {
+async function filmsJson(films: Film[], key: string) {
   const out: Awaited<ReturnType<typeof filmJson>>[] = new Array(films.length);
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(4, films.length) }, async () => {
       while (next < films.length) {
         const i = next++;
-        out[i] = await filmJson(films[i]);
+        out[i] = await filmJson(films[i], key);
       }
     }),
   );
+  // quem ainda não tem capa e detalhes entra na fila (em segundo plano; a sala recebe "cinema:library" quando chegar)
+  ensureMeta(films.map((f, i) => metaFilm(f, out[i].duration)));
   return out;
 }
 
@@ -200,6 +236,8 @@ async function sendFile(req: Request, res: Response, path: string, type: string,
     }
 }
 
+const IMG_NAME = /^[a-f0-9]{40}\.jpg$/;
+
 const PREP_MIME: Record<string, string> = { m3u8: 'application/vnd.apple.mpegurl', m4s: 'video/iso.segment', mp4: 'video/mp4' };
 
 /** Antes do requireAuth: o <video> não manda o login, então vem com uma chave assinada. */
@@ -210,6 +248,17 @@ export function registerCinemaPublicRoutes(api: Router) {
     const film = findFilm(req.params.id);
     if (!film) return void res.status(404).json({ error: 'Esse filme não está mais na pasta.' });
     await sendFile(req, res, join(cinemaDir(), film.file), MIME[`.${film.ext}`] ?? 'application/octet-stream', 'private, no-store');
+  });
+
+  // capas, fundos e imagens dos episódios guardados (?chave no caminho, como o resto do cinema)
+  api.get('/cinema/img/:key/:name', (req, res) => {
+    if (!checkKey(req.params.key)) return void res.status(403).end();
+    if (!IMG_NAME.test(req.params.name)) return void res.status(404).end();
+    const path = join(imgDir(), req.params.name);
+    res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
+    res.sendFile(path, { headers: { 'Content-Type': 'image/jpeg' } }, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
   });
 
   // a versão preparada (troca de áudio). A chave vai no caminho: as playlists apontam para os pedaços com
@@ -305,6 +354,16 @@ function resumeIfReady(r: Room) {
     r.action = 'resume';
   }
 }
+
+// chegaram capas/detalhes novos: as salas abertas recarregam a biblioteca (no máximo uma vez por segundo)
+let libraryTimer: ReturnType<typeof setTimeout> | null = null;
+onMetaChange(() => {
+  if (libraryTimer) return;
+  libraryTimer = setTimeout(() => {
+    libraryTimer = null;
+    for (const [channelId, r] of rooms) if (r.viewers.size) io?.to(`cinema:${channelId}`).emit('cinema:library', { channelId });
+  }, 1000);
+});
 
 // progresso do preparo: vai para todas as salas de cinema abertas
 onPrepChange((fileId, status) => {
@@ -438,10 +497,72 @@ export function registerCinemaRoutes(api: Router) {
     if (!isCinema(channel)) fail(400, 'Este canal não é uma sala de cinema');
     res.json({
       configured: !!cinemaDir(),
-      films: await filmsJson(library(req.query.refresh === '1')),
-      key: fileKey(uid(res)),
+      ...(await (async () => {
+        const key = fileKey(uid(res));
+        return { films: await filmsJson(library(req.query.refresh === '1'), key), key };
+      })()),
+      tmdb: hasTmdb(),
+      canEdit: has(channelPermissions(channel, uid(res)), P.MANAGE_CHANNELS),
       state: cinemaState(channel.id),
     });
+  });
+
+  // ---------- corrigir capa e detalhes (quem gerencia o canal) ----------
+  const editable = (req: Request, res: Response) => {
+    const channel = requireChannelPerm(String(req.params.id), uid(res), P.MANAGE_CHANNELS);
+    if (!isCinema(channel)) fail(400, 'Este canal não é uma sala de cinema');
+    const film = findFilm(String(req.params.filmId ?? '')) ?? fail(404, 'Esse filme não está mais na pasta.');
+    return film;
+  };
+
+  api.get('/channels/:id/cinema/search', async (req, res) => {
+    const channel = requireChannelPerm(req.params.id, uid(res), P.MANAGE_CHANNELS);
+    if (!isCinema(channel)) fail(400, 'Este canal não é uma sala de cinema');
+    if (!hasTmdb()) fail(400, 'Falta a chave do TMDB no servidor (TMDB_API_KEY no .env).');
+    const q = String(req.query.q ?? '').trim().slice(0, 100);
+    if (!q) return void res.json({ results: [] });
+    const kind = req.query.kind === 'movie' || req.query.kind === 'tv' ? req.query.kind : 'all';
+    try {
+      res.json({ results: await searchTmdb(q, kind) });
+    } catch (err) {
+      fail(502, `Não deu para buscar no TMDB: ${err instanceof Error ? err.message : 'erro'}`);
+    }
+  });
+
+  // { tmdbId, kind } liga ao TMDB; { title, year, overview } põe dados próprios
+  api.put('/channels/:id/cinema/films/:filmId/meta', async (req, res) => {
+    const film = editable(req, res);
+    const body = req.body ?? {};
+    if (typeof body.tmdbId === 'number' && (body.kind === 'movie' || body.kind === 'tv')) {
+      try {
+        const meta = await setTmdbMatch(metaFilm(film), body.kind, body.tmdbId);
+        if (body.kind === 'tv') refreshSeries(library().map((f) => metaFilm(f)), film.file);
+        return void res.json({ meta: metaJson(meta, fileKey(uid(res))) });
+      } catch (err) {
+        fail(502, err instanceof Error ? err.message : 'Não deu para buscar no TMDB');
+      }
+    }
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 120) : undefined;
+    if (title !== undefined && !title) fail(400, 'O título não pode ficar vazio');
+    const year = body.year === null || body.year === '' ? 0 : body.year !== undefined ? Number(body.year) : undefined;
+    if (year !== undefined && year !== 0 && !(Number.isInteger(year) && year >= 1880 && year <= 2100)) fail(400, 'Ano inválido');
+    const overview = typeof body.overview === 'string' ? body.overview.trim().slice(0, 2000) : undefined;
+    res.json({ meta: metaJson(setCustom(metaFilm(film), { title, year, overview }), fileKey(uid(res))) });
+  });
+
+  // capa própria (imagem no corpo do pedido)
+  api.post('/channels/:id/cinema/films/:filmId/poster', express.raw({ type: () => true, limit: '9mb' }), (req, res) => {
+    const film = editable(req, res);
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!data.length || !detectImage(data)) fail(400, 'Mande uma imagem (JPG, PNG, WebP ou GIF)');
+    res.json({ meta: metaJson(setCustom(metaFilm(film), { poster: saveOwnImage(data) }), fileKey(uid(res))) });
+  });
+
+  // volta ao automático
+  api.delete('/channels/:id/cinema/films/:filmId/meta', (req, res) => {
+    const film = editable(req, res);
+    resetMeta(metaFilm(film));
+    res.json({ ok: true });
   });
 
   // preparar antes da sessão (para ninguém esperar na hora): o botão "Preparar" da biblioteca

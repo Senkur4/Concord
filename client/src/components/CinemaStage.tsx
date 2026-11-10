@@ -1,4 +1,4 @@
-import { AudioLines, Clapperboard, Film, FolderOpen, HardDrive, ListVideo, RefreshCw, Server, TriangleAlert, Wand2 } from 'lucide-react';
+import { AudioLines, Clapperboard, FolderOpen, HardDrive, ListVideo, Server, SkipForward, TriangleAlert, Wand2 } from 'lucide-react';
 import type Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
@@ -6,34 +6,15 @@ import { getSocket } from '../lib/socket';
 import { memberName, type Channel, type ServerDetail } from '../lib/types';
 import { useApp } from '../store/app';
 import { toast } from '../store/toast';
-import { AvatarStack, Spinner, cx } from './ui';
+import { AvatarStack, Spinner } from './ui';
 import { MenuOption, VideoPlayer, type PlayerSync } from './VideoPlayer';
+import { CinemaLibrary, filmTitle, fmtSize, nextEpisode, type FilmInfo, type LibraryData, type PrepInfo } from './CinemaLibrary';
 
 /**
  * Tela da sala de cinema. Ninguém transmite: cada um toca o arquivo (do servidor ou do próprio PC) e o servidor só
  * diz "qual filme, tocando ou pausado, em qual segundo". Este componente mantém o <video> de cada um no mesmo ponto:
  * pulos grandes viram um pulo, diferenças pequenas são corrigidas acelerando ou freando o vídeo de leve (até 5%).
  */
-
-interface PrepInfo {
-  state: 'queued' | 'running' | 'ready' | 'failed';
-  progress: number;
-  error?: string;
-}
-
-interface FilmInfo {
-  id: string;
-  name: string;
-  file: string;
-  size: number;
-  ext: string;
-  duration: number;
-  /** faixas de áudio do arquivo */
-  audio: { label: string; codec: string }[];
-  /** mais de uma faixa (ou áudio que o navegador não toca): toca a versão preparada, com troca de áudio */
-  needsPrep: boolean;
-  prep: PrepInfo | null;
-}
 
 /** a faixa de áudio que a pessoa escolheu por último (por idioma/nome): vale para os próximos filmes */
 const AUDIO_PREF_KEY = 'concord.cinemaAudio';
@@ -60,7 +41,6 @@ interface CinemaState {
   now: number;
 }
 
-const fmtSize = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1).replace('.', ',')} GB` : `${Math.max(1, Math.round(b / 1024 ** 2))} MB`);
 const fmtTime = (s: number) => {
   const t = Math.max(0, Math.floor(s));
   const h = Math.floor(t / 3600);
@@ -79,7 +59,7 @@ function bufferedAhead(v: HTMLVideoElement) {
 
 export function CinemaStage({ channel, detail }: { channel: Channel; detail: ServerDetail }) {
   const meId = useApp((s) => s.me?.id);
-  const [lib, setLib] = useState<{ configured: boolean; films: FilmInfo[]; key: string } | null>(null);
+  const [lib, setLib] = useState<LibraryData | null>(null);
   const [loadingLib, setLoadingLib] = useState(false);
   const [state, setState] = useState<CinemaState | null>(null);
   const [local, setLocal] = useState<{ fileId: string; url: string; name: string; size: number } | null>(null);
@@ -108,7 +88,7 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
     async (refresh = false) => {
       setLoadingLib(true);
       try {
-        const res = await api.get<{ configured: boolean; films: FilmInfo[]; key: string; state: CinemaState }>(`/channels/${channel.id}/cinema${refresh ? '?refresh=1' : ''}`);
+        const res = await api.get<LibraryData & { state: CinemaState }>(`/channels/${channel.id}/cinema${refresh ? '?refresh=1' : ''}`);
         setLib(res);
       } catch (err) {
         toast.error(err);
@@ -179,15 +159,19 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
     };
     socket.on('cinema:state', onState);
     socket.on('cinema:prep', onPrep);
+    // chegaram capas e detalhes novos (ou alguém corrigiu): recarrega a biblioteca
+    const onLibrary = (d: { channelId: string }) => d.channelId === channel.id && void loadLibrary();
+    socket.on('cinema:library', onLibrary);
     socket.on('connect', watch);
     if (socket.connected) watch();
     return () => {
       socket.off('cinema:state', onState);
       socket.off('cinema:prep', onPrep);
+      socket.off('cinema:library', onLibrary);
       socket.off('connect', watch);
       socket.emit('cinema:unwatch', { channelId: channel.id });
     };
-  }, [channel.id, apply, meId, nameOf]);
+  }, [channel.id, apply, meId, nameOf, loadLibrary]);
 
   useEffect(() => {
     if (!notice) return;
@@ -349,6 +333,7 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
         )
       : undefined;
   const waitingNames = (state?.waiting ?? []).map(nameOf);
+  const next = lib && fileId ? nextEpisode(lib.films, fileId) : null;
   const viewers = (state?.viewers ?? []).map((id) => detail.members.find((m) => m.id === id)).filter((m) => !!m);
 
   const banner = waitingNames.length ? (
@@ -394,75 +379,15 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
   // ---------- biblioteca (nenhum filme escolhido) ----------
   if (!fileId) {
     return (
-      <div className="flex h-full flex-col">
-        <div className="flex items-center gap-3 px-6 pt-5 pb-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent/15 text-accent">
-            <Clapperboard size={22} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="font-display text-lg font-bold">Escolha um filme</h2>
-            <p className="text-sm text-fg-muted">Todo mundo na sala assiste junto, no mesmo segundo.</p>
-          </div>
-          {viewers.length > 0 && <AvatarStack people={viewers.map((m) => ({ id: m.id, name: memberName(m), color: m.avatarColor, src: m.avatarUrl }))} max={6} size={28} />}
-          <button
-            onClick={() => void loadLibrary(true)}
-            title="Procurar filmes novos na pasta"
-            aria-label="Atualizar a lista de filmes"
-            className="flex h-10 w-10 items-center justify-center rounded-full text-fg-muted hover:bg-surface-3 hover:text-fg"
-          >
-            <RefreshCw size={18} className={cx(loadingLib && 'animate-spin')} />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          {!lib.films.length ? (
-            <div className="mx-auto mt-10 max-w-md rounded-3xl bg-surface-2 p-6 text-center">
-              <Film size={36} className="mx-auto text-fg-subtle" />
-              <p className="mt-3 font-semibold">{lib.configured ? 'Nenhum filme na pasta ainda' : 'A pasta de filmes não está configurada'}</p>
-              <p className="mt-1.5 text-sm text-fg-muted">
-                {lib.configured ? (
-                  <>
-                    Coloque arquivos <b>.mp4</b> ou <b>.mkv</b> na pasta <b>videos</b>, ao lado do docker-compose (pode usar subpastas), e clique em atualizar.
-                  </>
-                ) : (
-                  <>Quem hospeda o servidor precisa definir CINEMA_DIR (no Docker, a pasta videos já vem ligada).</>
-                )}
-              </p>
-            </div>
-          ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
-              {lib.films.map((f) => {
-                const folder = f.file.includes('/') ? f.file.slice(0, f.file.lastIndexOf('/')) : '';
-                return (
-                  <li key={f.id}>
-                    <button
-                      onClick={() => emit('cinema:control', { action: 'load', fileId: f.id })}
-                      className="group flex w-full items-center gap-3 rounded-2xl bg-surface-2 p-3 text-left transition-colors hover:bg-surface-3"
-                    >
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-black/30 text-fg-muted transition-colors group-hover:bg-accent group-hover:text-white">
-                        <Film size={20} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold">{f.name}</span>
-                        <span className="block truncate text-xs text-fg-muted">
-                          {folder && `${folder} · `}
-                          {fmtSize(f.size)}
-                        </span>
-                      </span>
-                      {f.audio.length > 1 && (
-                        <span title={f.audio.map((a) => a.label).join(' · ')} className="flex items-center gap-1 rounded-md bg-surface-0 px-1.5 py-0.5 text-[10px] font-bold text-fg-muted">
-                          <AudioLines size={11} /> {f.audio.length} áudios
-                        </span>
-                      )}
-                      <span className="rounded-md bg-surface-0 px-1.5 py-0.5 text-[10px] font-bold text-fg-muted uppercase">{f.ext}</span>
-                    </button>
-                    {f.needsPrep && <PrepLine film={f} onPrepare={() => void prepare(f.id)} />}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
+      <CinemaLibrary
+        lib={lib}
+        channelId={channel.id}
+        loading={loadingLib}
+        viewers={viewers.length > 0 ? <AvatarStack people={viewers.map((m) => ({ id: m.id, name: memberName(m), color: m.avatarColor, src: m.avatarUrl }))} max={6} size={28} /> : null}
+        onRefresh={(force) => void loadLibrary(force)}
+        onPlay={(id) => emit('cinema:control', { action: 'load', fileId: id })}
+        onPrepare={(id) => void prepare(id)}
+      />
     );
   }
 
@@ -470,18 +395,27 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
-        <Clapperboard size={18} className="shrink-0 text-accent" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-display font-bold">{state.name || film?.name}</div>
-          <div className="flex items-center gap-1 text-xs text-fg-muted">
+        {film?.meta?.poster || film?.meta?.still || film?.meta?.frame ? (
+          <img src={(film.meta.poster ?? film.meta.still ?? film.meta.frame)!} alt="" className="h-11 w-8 shrink-0 rounded-md object-cover ring-1 ring-white/10" />
+        ) : (
+          <Clapperboard size={18} className="shrink-0 text-accent" />
+        )}
+        <div className="min-w-[180px] flex-1">
+          <div className="truncate font-display font-bold" title={film ? filmTitle(film) : state.name}>
+            {film ? filmTitle(film) : state.name}
+          </div>
+          <div className="flex min-w-0 items-center gap-1 text-xs text-fg-muted">
             {local ? (
               <>
-                <HardDrive size={12} /> Tocando do seu PC: {local.name}
+                <HardDrive size={12} className="shrink-0" /> <span className="truncate">Do seu PC: {local.name}</span>
               </>
             ) : (
               <>
-                <Server size={12} /> Tocando do servidor, na qualidade original{film ? ` · ${fmtSize(film.size)}` : ''}
-                {prepared && tracks.length > 1 && ` · ${tracks.length} faixas de áudio (troque na engrenagem)`}
+                <Server size={12} className="shrink-0" />
+                <span className="truncate" title={prepared && tracks.length > 1 ? 'Troque a faixa de áudio na engrenagem do player' : undefined}>
+                  Do servidor, qualidade original{film ? ` · ${fmtSize(film.size)}` : ''}
+                  {prepared && tracks.length > 1 && ` · ${tracks.length} áudios`}
+                </span>
               </>
             )}
           </div>
@@ -500,7 +434,7 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
             }}
             className="flex h-9 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm font-semibold hover:bg-surface-3"
           >
-            <Server size={15} /> Voltar ao do servidor
+            <Server size={15} /> Do servidor
           </button>
         ) : (
           <button
@@ -508,11 +442,20 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
             title="Se você tem o mesmo filme no PC, toca dele: qualidade máxima sem usar a internet"
             className="flex h-9 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm font-semibold hover:bg-surface-3"
           >
-            <FolderOpen size={15} /> Usar arquivo do meu PC
+            <FolderOpen size={15} /> Do meu PC
+          </button>
+        )}
+        {next && (
+          <button
+            onClick={() => emit('cinema:control', { action: 'load', fileId: next.id })}
+            title={`Próximo episódio: ${filmTitle(next)}`}
+            className="flex h-9 items-center gap-1.5 rounded-full bg-accent px-3 text-sm font-semibold text-white hover:brightness-110"
+          >
+            <SkipForward size={15} /> Próximo
           </button>
         )}
         <button onClick={() => emit('cinema:control', { action: 'stop' })} className="flex h-9 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm font-semibold hover:bg-surface-3">
-          <ListVideo size={15} /> Trocar filme
+          <ListVideo size={15} /> Biblioteca
         </button>
         <input
           ref={localInput}
@@ -547,7 +490,7 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
           <VideoPlayer
             key={playerKey}
             src={src}
-            name={state.name || 'Filme'}
+            name={film ? filmTitle(film) : state.name || 'Filme'}
             sync={{ ...sync, banner, menuRows }}
             onNoVideo={() => {}}
             onBroken={() => setBroken(true)}
@@ -568,28 +511,6 @@ export function CinemaStage({ channel, detail }: { channel: Channel; detail: Ser
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Linha embaixo do filme na biblioteca: preparar a troca de áudio antes da sessão. */
-function PrepLine({ film, onPrepare }: { film: FilmInfo; onPrepare: () => void }) {
-  const p = film.prep;
-  if (p?.state === 'ready') return null;
-  return (
-    <div className="mt-1 flex items-center gap-2 px-3 text-xs text-fg-muted">
-      {p?.state === 'running' || p?.state === 'queued' ? (
-        <>
-          <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
-            <span className="block h-full bg-accent transition-[width]" style={{ width: `${Math.round(p.progress * 100)}%` }} />
-          </span>
-          {p.state === 'queued' ? 'Na fila' : `Preparando ${Math.round(p.progress * 100)}%`}
-        </>
-      ) : (
-        <button onClick={onPrepare} className="flex items-center gap-1 font-semibold text-accent hover:underline">
-          <Wand2 size={12} /> {p?.state === 'failed' ? 'Tentar preparar de novo' : 'Preparar agora (troca de áudio)'}
-        </button>
-      )}
     </div>
   );
 }
