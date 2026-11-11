@@ -30,6 +30,19 @@ Se um pedaço cair (servidor, LiveKit ou bots), ele é religado sozinho em pouco
 Para não ligar mais junto com o Windows:
 `powershell -ExecutionPolicy Bypass -File windows\ligar-com-windows.ps1 -Desligar`
 
+## Liberar só os seus amigos no firewall
+
+No `.env`, coloque os IPs do Radmin de cada amigo (aparecem do lado do nome dele no Radmin), separados por vírgula:
+
+```
+AMIGOS_RADMIN=26.11.22.33, 26.44.55.66
+LIBERAR_REDE_DE_CASA=sim
+```
+
+Depois rode `firewall.bat` de novo. Entrou um amigo novo? Acrescente o IP dele e rode outra vez.
+Com `AMIGOS_RADMIN` vazio, qualquer pessoa de qualquer rede do Radmin em que você estiver consegue acessar.
+`LIBERAR_REDE_DE_CASA=nao` bloqueia também os outros aparelhos da sua casa.
+
 ## Se algo der errado
 
 Os registros ficam em `windows\logs` (`concord.log`, `concord.erros.log`, `livekit.log`...).
